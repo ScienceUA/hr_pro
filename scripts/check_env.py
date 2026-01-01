@@ -1,8 +1,15 @@
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 import os
 import psycopg2
 from pymongo import MongoClient
 from pgvector.psycopg2 import register_vector
 from dotenv import load_dotenv
+from config.load_config import load_app_config
 
 # 1. Загружаем пароли из .env
 load_dotenv()
@@ -49,6 +56,37 @@ def check_postgres():
         register_vector(conn)
         conn.commit()
         
+        # Smoke-test pgvector: создаём таблицу с колонкой vector(3),
+        # вставляем вектор длины 3 и читаем его обратно.
+        cur.execute("DROP TABLE IF EXISTS vector_smoke_test;")
+        cur.execute("""
+            CREATE TABLE vector_smoke_test (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                embedding vector(3) NOT NULL
+            );
+        """)
+        conn.commit()
+
+        # ВАЖНО: vector(3) = ровно 3 числа в векторе
+        cur.execute(
+            "INSERT INTO vector_smoke_test (name, embedding) VALUES (%s, %s) RETURNING id;",
+            ("test", [0.1, 0.2, 0.3])
+        )
+        inserted_id = cur.fetchone()[0]
+        conn.commit()
+
+        cur.execute(
+            "SELECT id, name, embedding FROM vector_smoke_test WHERE id = %s;",
+            (inserted_id,)
+        )
+        row = cur.fetchone()
+        print(f"✅ pgvector Smoke-test OK! Row: id={row[0]}, name={row[1]}, embedding={row[2]}")
+
+        # Чистим за собой
+        cur.execute("DROP TABLE IF EXISTS vector_smoke_test;")
+        conn.commit()
+
         # Проверка: простой SQL запрос
         cur.execute("SELECT version();")
         version = cur.fetchone()[0]
@@ -60,5 +98,7 @@ def check_postgres():
         print(f"❌ Postgres Failed: {e}")
 
 if __name__ == "__main__":
+    cfg = load_app_config()
+    print(f"--- APP CONFIG LOADED --- soft={cfg['limits']['search_soft_limit']} hard={cfg['limits']['search_hard_limit']}")
     check_mongo()
     check_postgres()

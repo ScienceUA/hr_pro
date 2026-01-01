@@ -1,0 +1,20 @@
+app:
+  name: "HR-Agent Pro"
+  mode: "dev"
+
+limits:
+  search_soft_limit: 50
+  search_hard_limit: 500
+  batch_size: 50
+
+ranking:
+  enabled: true
+  weights:
+    mandatory: 1.0
+    desirable: 0.7
+    cultural: 0.9
+
+analysis:
+  deep_analysis_mode_default: "ask_user"   # ask_user | all | manual_select
+  require_user_choice_after_filter: true
+
