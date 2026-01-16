@@ -1,0 +1,224 @@
+STRUCTURE REPORT
+Fixtures dir: /Users/olegpozynich/Documents/Dev/hr_pro/tests/fixtures/raw
+Count: 4
+========================================================================
+
+========================================================================
+ANALYZING: resume_not_found_missing.html
+========================================================================
+[H1] Found: True
+     Path: body > main#center > div.container > h1.text-center
+     Text: Сторінку не знайдено
+[H2] Headers count: 2
+     #1: 'Зупинись. Пам'ятай. Дій.'
+         Path: div.modal-dialog > div.flex-direction-column > div.modal-header > h2.text-white
+     #2: 'Вибачте, але ні.'
+         Path: div.modal-dialog > div.flex-direction-column > div.modal-silence-alert > h2.my-0
+[SALARY] Candidates:
+     NOT FOUND
+[SERP] Resume links count: 0
+[SERP] Card-like containers (first 5):
+     (none)
+
+========================================================================
+ANALYZING: resume_ok_full_profile.html
+========================================================================
+[H1] Found: True
+     Path: div.flex-direction-column > div.flex-1 > div.mt-lg > h1.mt-0
+     Text: Сергій
+[H2] Headers count: 33
+     #1: 'Директор департаменту, начальник управління (Collection), керівник компанії СЕО,'
+         Path: div.flex-direction-column > div.flex-1 > div.mt-lg > h2.title-print
+     #2: 'Контактна інформація'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2#contactInfo
+     #3: 'Досвід роботи'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2
+     #4: 'Директор компанії'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #5: 'Директор по роботі з проблемними активами ТОВ «ФИНАНСОВА КОМПАНІЯ"ОКЕАН"'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #6: 'Начальник управління по роботі з проблемними активами ТОВ "ЄАПБ" ТАS'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #7: 'Засновник'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #8: 'Начальник відділу по роботі з проблемною заборгованістю деп. управління ризиками'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #9: 'Директор Першого Київського центру управління кред. заборгованістю клієнтів РБ'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #10: 'Провідний спеціаліст з контролю простроченої заборгованості КРД'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #11: 'Спеціаліст досудового стягнення заборгованості 2-го ЦУКЗК РБ'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #12: 'Провідний спеціаліст відділу досудового стягнення Департаменту стягнення боргів'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #13: 'Старший фінансовий консультант СМБ'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #14: 'Гол. спеціаліст відділу адміністрування та кредитного контролю деп. Факторингу'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #15: 'Провідний спеціаліст відділу адміністрування та кред. контролю деп.Факторингу'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #16: 'Адміністратор  Департаменту безпеки'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #17: 'Інспектор Департаменту безпеки'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #18: 'Освіта'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2
+     #19: 'Університет банківської справи НБУ'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #20: 'Київський міжнародний університет цивільної авіації'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #21: 'Додаткова освіта та сертифікати'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2
+     #22: 'Курси НБУ'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.sm:mt-xl
+     #23: 'Знання і навички'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2.mb-sm
+     #24: 'Знання мов'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2
+     #25: 'Додаткова інформація'
+         Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > h2
+     #26: 'Інші резюме цього кандидата'
+         Path: div.container > div.row-print > div.col-md-8 > h2.hidden-print
+     #27: 'Директор компанії, керівник (Collection), керуючий проблемними активами'
+         Path: div.hidden-print > div.card-visited > div.mt-sm > h2.mt-0
+     #28: 'Операційний директор, начальник управління, департаменту'
+         Path: div.hidden-print > div.card-visited > div.mt-sm > h2.mt-0
+     #29: 'Схожі кандидати'
+         Path: div.container > div.row-print > div.col-md-8 > h2.hidden-print
+     #30: 'Кандидати у категоріях'
+         Path: div.col-md-8 > div.hidden-print > div.col-md-6 > h2.mt-2xl
+[SALARY] Candidates:
+     Text: , 80 000 грн
+     Path: div.flex-direction-column > div.flex-1 > div.mt-lg > h2.title-print
+     Text: Організація та координація роботи «Soft Collection», «Hard Collection», регіональних представників з продажу заставного 
+     Path: div.col-md-8 > div.card-spell-wrapper > div#resume_7502793 > p.text-default-7
+     Text: 37000 грн
+     Path: div.row-print > div.col-md-8 > ul.list-unstyled > li.no-style
+[SERP] Resume links count: 16
+     Sample HREF: https://www.work.ua/resumes/7502793/
+     Sample Path: div.pull-right > ul#header-language-switcher-list > li.active > a
+[SERP] Card-like containers (first 5):
+     - div.link-section > div.pull-right > ul#header-language-switcher-list > li.active
+     - div.link-section > div.pull-right > ul#header-language-switcher-list > li
+     - nav.navbar-inverse > div.container > ul.navbar-nav > li.active
+     - div.container > div.wrap-breadcrumb > ol.breadcrumb > li
+     - div.clearfix > div#dropdownContainer > ul.dropdown-menu-icon > li
+
+========================================================================
+ANALYZING: serp_ok_python_kyiv.html
+========================================================================
+[H1] Found: True
+     Path: div.col-md-8 > div.flex-align-flex-start > div.text-default-7 > h1.text-basic
+     Text: 305 кандидатівза 3 місяціPython                                    у Києві
+[H2] Headers count: 16
+     #1: 'Python developer'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #2: 'Python Developer'
+         Path: div#pjax-resume-list > div.card-visited > div.sm:mt-xl > h2.mt-0
+     #3: 'Python-програміст'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #4: 'Python developer'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #5: 'Junior Python Developer'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #6: 'Software Engineer, Python, JavaScript'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #7: 'Python developer'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #8: 'Python-розробник'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #9: 'Software Developer (.NET, Unity, Python)'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #10: 'Python-програміст'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #11: 'Python-програміст'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #12: 'Junior Python Developer'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #13: 'Python Developer Intern'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #14: 'Автоматизація бізнес-процесів, FullStack-розробник (Python)'
+         Path: div#pjax-resume-list > div.card-visited > div.mt-sm > h2.mt-0
+     #15: 'Зупинись. Пам'ятай. Дій.'
+         Path: div.modal-dialog > div.flex-direction-column > div.modal-header > h2.text-white
+     #16: 'Вибачте, але ні.'
+         Path: div.modal-dialog > div.flex-direction-column > div.modal-silence-alert > h2.my-0
+[SALARY] Candidates:
+     Text: 15 000 грн (58)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryfrom_selection > option
+     Text: 20 000 грн (56)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryfrom_selection > option
+     Text: 30 000 грн (41)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryfrom_selection > option
+     Text: 40 000 грн (28)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryfrom_selection > option
+     Text: 50 000 грн (21)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryfrom_selection > option
+     Text: 100 000 грн і більше (8)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryfrom_selection > option
+     Text: 10 000 грн (3)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryto_selection > option
+     Text: 15 000 грн (5)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryto_selection > option
+     Text: 20 000 грн (13)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryto_selection > option
+     Text: 30 000 грн (28)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryto_selection > option
+     Text: 40 000 грн (37)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryto_selection > option
+     Text: 50 000 грн (43)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryto_selection > option
+     Text: 100 000 грн (55)
+     Path: ul.list-unstyled > li.flex-align-center > select#salaryto_selection > option
+     Text: 20 000 грн
+     Path: div.col-md-8 > div#pjax-resume-list > div.card-visited > p.nowrap
+     Text: 187 000 грн
+     Path: div.col-md-8 > div#pjax-resume-list > div.card-visited > p.nowrap
+[SERP] Resume links count: 27
+     Sample HREF: /resumes/
+     Sample Path: div.container > ul.navbar-nav > li.active > a.no-decoration
+[SERP] Card-like containers (first 5):
+     - nav.navbar-inverse > div.container > ul.navbar-nav > li.active
+     - div.col-md-8 > div#pjax-resume-list > div.card-visited > div.mt-sm
+     - div.col-md-8 > div#pjax-resume-list > div.card-visited > div.sm:mt-xl
+     - div.row > div.col-md-8 > div#pjax-resume-list > div.card-visited
+     - div#pjax-resume-list > div.card-visited > ul.list-unstyled > li.text-default-7
+
+========================================================================
+ANALYZING: serp_test_smoke_test.html
+========================================================================
+[H1] Found: True
+     Path: header.header-default > section.header-info > div.container > h1.add-bottom-xs
+     Text: Сервіс пошуку роботи №1 в Україні
+[H2] Headers count: 9
+     #1: 'Завантажте застосунок Work.ua'
+         Path: a#decorMobileAppOnMain > div.row > div.col-sm-7 > h2.text-default
+     #2: 'Як знайти роботу'
+         Path: div.flex-wrap > div.col-sm-12 > a#decorHowToFindJobOnMain > h2.text-default
+     #3: 'Створіть резюме'
+         Path: div.col-sm-12 > div.mt-lg > a.no-decoration > h2.text-default
+     #4: 'Знаходьте вакансії з перевагою для ветеранів'
+         Path: div.col-sm-12 > a.no-decoration > div.b-veteran-content > h2.text-default
+     #5: 'Середня зарплата'
+         Path: div.col-md-6 > div.flex-direction-column > div.flex-justify-between > h2.mr-xs
+     #6: 'Зупинись. Пам'ятай. Дій.'
+         Path: div.modal-dialog > div.flex-direction-column > div.modal-header > h2.text-white
+     #7: 'Вибачте, але ні.'
+         Path: div.modal-dialog > div.flex-direction-column > div.modal-silence-alert > h2.my-0
+     #8: 'Пошук вакансій'
+         Path: div.block-relative > div.modal-sticky > div.modal-header > h2#modalLabelPosition
+     #9: 'Пошук вакансій'
+         Path: div.block-relative > div.modal-sticky > div.modal-header > h2#modalLabelPosition
+[SALARY] Candidates:
+     Text: 27 500 грн
+     Path: div.col-md-6 > div.flex-direction-column > div.flex-justify-between > div.visible-xs-inline-block
+     Text: 16 000 грн
+     Path: div.chart-vertical-animation > div.chart-vertical-first > div.chart-item > div.chart-amount-from
+     Text: 51 000 грн
+     Path: div.chart-vertical-animation > div.chart-vertical-last > div.chart-item > div.chart-amount-to
+[SERP] Resume links count: 3
+     Sample HREF: /jobseeker/my/resumes/create/?step=card
+     Sample Path: section.flex-wrap > div.col-sm-12 > div.mt-lg > a.no-decoration
+[SERP] Card-like containers (first 5):
+     - div.container > section.flex-wrap > div.col-sm-12 > div.mt-lg
+     - section.flex-wrap > div.col-sm-12 > div.mt-lg > div.icon-block

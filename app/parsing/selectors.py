@@ -1,0 +1,69 @@
+class CSS:
+    """
+    Централизованное хранилище CSS-селекторов.
+    Связь с PageType:
+    - SIGNATURE_* -> используются в BaseParser._classify_page() для определения PageType
+    - RESUME_* -> используются для извлечения данных, если PageType == RESUME
+    - SERP_* -> используются для извлечения данных, если PageType == SERP
+    """
+    
+    # --- 1. Signatures (Определение PageType) ---
+    
+    # PageType.LOGIN
+    SIGNATURE_LOGIN = "form[action*='login'], input[name='login']"
+    
+    # PageType.CAPTCHA
+    SIGNATURE_CAPTCHA = "#g-recaptcha-response, iframe[src*='captcha']"
+    
+    # PageType.BAN (WAF / Cloudflare)
+    # :contains не работает в BS4.select, проверяем наличие контейнера ошибки
+    SIGNATURE_WAF = "div.cf-error-details" 
+    
+    # PageType.NOT_FOUND
+    # Требует доп. проверки текста "не знайдено" внутри
+    SIGNATURE_404 = "h1.text-center" 
+    
+    # PageType.RESUME
+    # Уникальный контейнер резюме (из отчета: div#resume_7502793)
+    SIGNATURE_RESUME = "div[id^='resume_']"
+
+    # PageType.SERP
+    # Контейнер списка
+    SIGNATURE_SERP = "#pjax-resume-list"
+
+
+    # --- 2. SERP Data Extraction (Только если PageType.SERP) ---
+    
+    # Карточка резюме.
+    # Из отчета: карточки имеют класс .card-visited (если посещали) или .card
+    # Исключаем прямые div, берем только сущности с классами карточки
+    SERP_ITEM = "#pjax-resume-list div.card, #pjax-resume-list div.card-visited"
+    
+    # Данные внутри карточки
+    SERP_LINK = "h2 a" 
+    SERP_TITLE = "h2 a"
+    SERP_SALARY = "p.nowrap"
+    SERP_SNIPPET = "div.mt-sm, p.text-default-7"
+    SERP_NEXT_PAGE = "ul.pagination a[rel='next'], ul.pagination a:not(.active)"
+
+
+    # --- 3. DETAIL Data Extraction (Только если PageType.RESUME) ---
+    
+    # Основные данные
+    RESUME_H1 = "h1"                   # Имя
+    RESUME_POSITION = "h2.title-print" # Должность
+    
+    # Зарплата
+    RESUME_SALARY_BLOCK = "ul.list-unstyled > li.no-style"
+    
+    # Мета (Возраст, Город)
+    RESUME_META_LIST = "ul.list-unstyled li"
+
+    # Блоки (Опыт, Образование)
+    BLOCK_HEADER = "h2"
+    
+    # Навыки
+    SKILL_TAGS = "ul.list-unstyled.my-0.flex.flex-wrap span.ellipsis"
+    
+    # Скрытые контакты (Флаг)
+    RESUME_HIDDEN_ALERT = "div.alert-warning, div.modal-silence-alert"

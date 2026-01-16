@@ -1,0 +1,20 @@
+{
+  "url_requested": "https://www.work.ua/resumes-kyiv-python/",
+  "url_final": "https://www.work.ua/resumes-kyiv-python/",
+  "status_code": 200,
+  "fetched_at": "2026-01-12T23:30:28.106263+00:00",
+  "signature": "ok",
+  "type": "serp",
+  "case": "ok",
+  "fetch_mode": "direct",
+  "content_type": "text/html; charset=utf-8",
+  "encoding_detected": "utf-8",
+  "headers": {
+    "date": "Mon, 12 Jan 2026 23:30:28 GMT",
+    "content-type": "text/html; charset=UTF-8",
+    "server": "cloudflare",
+    "vary": "Accept-Encoding",
+    "last-modified": "Mon, 12 Jan 2026 23:30:28 GMT",
+    "content-encoding": "gzip"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "url_requested": "https://www.work.ua/resumes/7502793/",
+  "url_final": "https://www.work.ua/resumes/7502793/",
+  "status_code": 200,
+  "fetched_at": "2026-01-12T23:32:06.675538+00:00",
+  "signature": "ok",
+  "type": "resume",
+  "case": "ok",
+  "fetch_mode": "direct",
+  "content_type": "text/html; charset=utf-8",
+  "encoding_detected": "utf-8",
+  "headers": {
+    "date": "Mon, 12 Jan 2026 23:32:06 GMT",
+    "content-type": "text/html; charset=UTF-8",
+    "server": "cloudflare",
+    "vary": "Accept-Encoding",
+    "last-modified": "Mon, 12 Jan 2026 23:32:06 GMT",
+    "content-encoding": "gzip"
+  }
+}

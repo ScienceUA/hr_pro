@@ -1,0 +1,238 @@
+{
+    "location": {
+      "all_ukraine": {
+        "name_ua": "Вся Україна",
+        "base_url": "https://www.work.ua/resumes/?notitle=1&snowide=1"
+      },
+      "other_countries": {
+        "name_ua": "Інші країни",
+        "base_url": "https://www.work.ua/resumes-other/?notitle=1&snowide=1"
+      },
+      "remote": {
+        "name_ua": "Дистанційно",
+        "base_url": "https://www.work.ua/resumes-remote/?notitle=1&snowide=1"
+      },
+      "cities": [
+        {
+          "slug": "kyiv",
+          "name_ua": "Київ",
+          "base_url": "https://www.work.ua/resumes-kyiv/?notitle=1&snowide=1"
+        },
+        {
+          "slug": "lviv",
+          "name_ua": "Львів",
+          "base_url": "https://www.work.ua/resumes-lviv/?notitle=1&snowide=1"
+        }
+      ]
+    },
+    "search_algorithm_defaults": {
+      "only_title": {
+        "param": "snowide",
+        "value": 1,
+        "example_url": "https://www.work.ua/resumes/?snowide=1"
+      },
+      "include_synonyms": {
+        "param": "notitle",
+        "value": 1,
+        "example_url": "https://www.work.ua/resumes/?notitle=1"
+      },
+      "any_word": {
+        "params": [
+          { "param": "anyword", "value": 1 },
+          { "param": "notitle", "value": 1 },
+          { "param": "snowide", "value": 1 }
+        ],
+        "example_url": "https://www.work.ua/resumes/?anyword=1&notitle=1&snowide=1"
+      },
+      "default_use_only_title_and_synonyms": true
+    },
+    "categories": [
+      {
+        "slug": "it",
+        "name_ua": "IT, комп'ютери, інтернет",
+        "base_url": "https://www.work.ua/resumes-it/"
+      },
+      {
+        "slug": "administration",
+        "name_ua": "Адмiнiстрацiя, керівництво середньої ланки",
+        "base_url": "https://www.work.ua/resumes-administration/"
+      },
+      {
+        "slug": "accounting",
+        "name_ua": "Бухгалтерія, аудит",
+        "base_url": "https://www.work.ua/resumes-accounting/"
+      },
+      {
+        "slug": "logistic-supply-chain",
+        "name_ua": "Логістика, склад, ЗЕД",
+        "base_url": "https://www.work.ua/resumes-logistic-supply-chain/"
+      },
+      {
+        "slug": "marketing-advertising-pr",
+        "name_ua": "Маркетинг, реклама, PR",
+        "base_url": "https://www.work.ua/resumes-marketing-advertising-pr/"
+      },
+      {
+        "slug": "sales",
+        "name_ua": "Продаж, закупівля",
+        "base_url": "https://www.work.ua/resumes-sales/"
+      },
+      {
+        "slug": "transport",
+        "name_ua": "Транспорт, автобізнес",
+        "base_url": "https://www.work.ua/resumes-auto-transport/"
+      },
+      {
+        "slug": "hr-recruitment",
+        "name_ua": "Управління персоналом, HR",
+        "base_url": "https://www.work.ua/resumes-hr-recruitment/"
+      }
+    ],
+    "gender": [
+      {
+        "id": 86,
+        "name_ua": "Чоловік",
+        "param": "gender",
+        "example_url": "https://www.work.ua/resumes/?gender=86"
+      },
+      {
+        "id": 87,
+        "name_ua": "Жінка",
+        "param": "gender",
+        "example_url": "https://www.work.ua/resumes/?gender=87"
+      }
+    ],
+    "age": {
+      "from_min": {
+        "param": "agefrom",
+        "value": 14,
+        "example_url": "https://www.work.ua/resumes/?agefrom=14"
+      },
+      "to_max": {
+        "param": "ageto",
+        "value": 65,
+        "example_url": "https://www.work.ua/resumes/?ageto=65"
+      }
+    },
+    "experience": [
+      {
+        "id": 166,
+        "name_ua": "Понад 5 років",
+        "param": "experience",
+        "example_url": "https://www.work.ua/resumes/?experience=166"
+      },
+      {
+        "id": 165,
+        "name_ua": "Від 2 до 5 років",
+        "param": "experience",
+        "example_url": "https://www.work.ua/resumes/?experience=165"
+      },
+      {
+        "id": 164,
+        "name_ua": "Від 1 до 2 років",
+        "param": "experience",
+        "example_url": "https://www.work.ua/resumes/?experience=164"
+      },
+      {
+        "id": 1,
+        "name_ua": "До 1 року",
+        "param": "experience",
+        "example_url": "https://www.work.ua/resumes/?experience=1"
+      },
+      {
+        "id": 0,
+        "name_ua": "Не визначили, без досвіду",
+        "param": "experience",
+        "example_url": "https://www.work.ua/resumes/?experience=0"
+      }
+    ],
+    "education": [
+      {
+        "id": 66,
+        "name_ua": "Вища",
+        "param": "education",
+        "example_url": "https://www.work.ua/resumes/?education=66"
+      },
+      {
+        "id": 67,
+        "name_ua": "Незакінчена вища",
+        "param": "education",
+        "example_url": "https://www.work.ua/resumes/?education=67"
+      }
+    ],
+    "languages": [
+      {
+        "id": 1,
+        "name_ua": "Англійська",
+        "param": "language",
+        "example_url": "https://www.work.ua/resumes/?language=1",
+        "levels": [
+          {
+            "language_id": 1,
+            "level_id": 83,
+            "level_name_ua": "Початковий",
+            "param_language": "language",
+            "param_level": "language_level",
+            "example_url": "https://www.work.ua/resumes/?language=1&language_level=1-83"
+          },
+          {
+            "language_id": 1,
+            "level_id": 84,
+            "level_name_ua": "Середній",
+            "example_url": "https://www.work.ua/resumes/?language=1&language_level=1-84"
+          },
+          {
+            "language_id": 1,
+            "level_id": 22835,
+            "level_name_ua": "Вище середнього",
+            "example_url": "https://www.work.ua/resumes/?language=1&language_level=1-22835"
+          },
+          {
+            "language_id": 1,
+            "level_id": 85,
+            "level_name_ua": "Просунутий",
+            "example_url": "https://www.work.ua/resumes/?language=1&language_level=1-85"
+          },
+          {
+            "language_id": 1,
+            "level_id": 22836,
+            "level_name_ua": "Вільно",
+            "example_url": "https://www.work.ua/resumes/?language=1&language_level=1-22836"
+          }
+        ]
+      },
+      {
+        "id": 41,
+        "name_ua": "Українська",
+        "param": "language",
+        "example_url": "https://www.work.ua/resumes/?language=41",
+        "levels": []
+      }
+    ],
+    "extra_flags": [
+      {
+        "param": "student",
+        "value": 1,
+        "name_ua": "Студент",
+        "example_url": "https://www.work.ua/resumes/?student=1"
+      },
+      {
+        "param": "photo",
+        "value": 1,
+        "name_ua": "Зі світлиною",
+        "example_url": "https://www.work.ua/resumes/?photo=1"
+      },
+      {
+        "param": "disability",
+        "value": 1,
+        "name_ua": "З інвалідністю",
+        "example_url": "https://www.work.ua/resumes/?disability=1"
+      },
+      {
+        "param": "veteran",
+        "value": 1,
+        "name_ua": "Ветерани російсько-української війни",
+        "example_url": "https://www.work.ua/resumes/?veteran=1"
+      }
+    ]
+  }

@@ -1,0 +1,20 @@
+{
+  "url_requested": "https://www.work.ua/resumes/00000000/",
+  "url_final": "https://www.work.ua/resumes/00000000/",
+  "status_code": 404,
+  "fetched_at": "2026-01-12T23:33:11.925092+00:00",
+  "signature": "not_found",
+  "type": "resume",
+  "case": "not_found",
+  "fetch_mode": "direct",
+  "content_type": "text/html; charset=utf-8",
+  "encoding_detected": "utf-8",
+  "headers": {
+    "date": "Mon, 12 Jan 2026 23:33:12 GMT",
+    "content-type": "text/html; charset=UTF-8",
+    "server": "cloudflare",
+    "vary": "Accept-Encoding",
+    "last-modified": "Mon, 12 Jan 2026 23:33:12 GMT",
+    "content-encoding": "gzip"
+  }
+}
