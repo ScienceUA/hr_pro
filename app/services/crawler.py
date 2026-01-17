@@ -29,7 +29,7 @@ class CrawlerService:
     """
     Оркестратор процесса сбора данных.
     Реализует цикл: SERP -> Links -> Dedup -> Detail -> Save.
-    Работает без прокси, поэтому строго соблюдает задержки и останавливается при бане.
+    Строго соблюдает задержки и останавливается при блокировках.
     """
 
     # Задержки (в секундах) для имитации человека
@@ -45,8 +45,15 @@ class CrawlerService:
         """
         Запуск краулера по поисковому запросу.
         """
-        # 1. Генерация стартового URL
-        start_url = UrlBuilder.build(query, city, params)
+        # 1. Генерация стартового URL (с учетом параметров фильтрации)
+        try:
+            start_url = UrlBuilder.build(query, city, params)
+        except Exception as e:
+            logger.error(f"Failed to build URL: {e}")
+            self.stats.critical_stop = True
+            self.stats.stop_reason = "URL Build Error"
+            return self.stats
+
         logger.info(f"🚀 Starting crawl. Query: '{query}', City: '{city}'. URL: {start_url}")
         
         current_url = start_url
@@ -58,64 +65,54 @@ class CrawlerService:
 
             logger.info(f"📂 Processing SERP page {self.stats.pages_processed + 1}: {current_url}")
             
-            # 2. Загрузка SERP
-            # Поскольку это SERP, мы используем парсер списка внутри логики обработки
-            # Но сначала нужно получить HTML и определить PageType через BaseParser (внутри fetcher)
-            # SmartFetcher.get(url) возвращает сырой HTML (bytes или str). Классификация PageType выполняется через BaseParser(html, url) на стороне сервиса.
-            
+            # --- 1. Fetching ---
             try:
-                html = self.fetcher.get(current_url)
+                html_content = self.fetcher.get(current_url)
+                if not html_content:
+                    logger.error("Empty response from fetcher for SERP.")
+                    self.stats.errors_serp += 1
+                    break
             except Exception as e:
                 logger.error(f"Network error fetching SERP: {e}")
                 self.stats.errors_serp += 1
                 break
 
-            # Классифицируем страницу через BaseParser (контракт парсинга, а не транспорта)
-            page_type = BaseParser(html, current_url).page_type
-
-            # 3. Safety Checks
-            if not self._check_page_safety(page_type, context="SERP"):
-                break
-
-            if page_type != PageType.SERP:
-                logger.warning(f"Unexpected page type for SERP: {page_type}. Stopping.")
-                self.stats.stop_reason = "Unexpected PageType"
-                break
-
-            # 4. Парсинг списка
-            # Передаем контент в SerpParser (он наследуется от BaseParser, но нам нужно переинициализировать 
-            # или использовать логику парсинга. SmartFetcher возвращает BaseParser. 
-            # Эффективнее создать SerpParser из сырого HTML, который есть в base_parser.soup, 
-            # но SmartFetcher не хранит raw bytes публично. 
-            # Упрощение: SmartFetcher.get возвращает инстанс BaseParser. 
-            # Мы пересоздадим SerpParser, передав soup.
+            # --- 2. Safety Check (Base Parser) ---
+            # Создаем легкий парсер только для проверки типа страницы
+            base_parser = BaseParser(html_content, current_url)
             
-            # ВАЖНО: SerpParser принимает (html_content, url). 
-            # Чтобы не качать заново, берем soup.encode() или передаем soup напрямую если парсер поддерживает.
-            # Наши парсеры принимают bytes/str.
-            serp_result = SerpParser(html, current_url).parse()
+            if not self._check_page_safety(base_parser.page_type, context="SERP"):
+                break
+
+            if base_parser.page_type != PageType.SERP:
+                logger.warning(f"Unexpected page type for SERP: {base_parser.page_type}. Stopping.")
+                self.stats.stop_reason = f"Unexpected PageType: {base_parser.page_type}"
+                break
+
+            # --- 3. Parsing (Serp Parser) ---
+            # Передаем ТОТ ЖЕ html_content напрямую
+            serp_parser = SerpParser(html_content, current_url)
+            serp_result = serp_parser.parse()
 
             if serp_result.quality == DataQuality.ERROR:
                 logger.error("Failed to parse SERP structure.")
                 self.stats.errors_serp += 1
                 break
 
-            # payload для SERP - это список ResumePreviewData
             previews = serp_result.payload or []
             self.stats.candidates_found += len(previews)
             logger.info(f"   Found {len(previews)} candidates on page.")
 
-            # 5. Обработка кандидатов (Detail Loop)
+            # --- 4. Detail Loop (Candidates) ---
             for preview in previews:
                 if self.stats.critical_stop:
                     break
-                
                 self._process_candidate(preview)
 
-            # 6. Пагинация
+            # --- 5. Pagination ---
             next_url = serp_result.next_page_url
             
-            # Защита от зацикливания
+            # Защита от зацикливания (если next_url ведет на ту же страницу)
             if next_url == current_url:
                 logger.warning("Next page URL matches current. Loop detected.")
                 break
@@ -135,6 +132,7 @@ class CrawlerService:
         Логика обработки одного кандидата: Дедупликация -> Скачивание -> Парсинг -> Сохранение.
         """
         # 1. Дедупликация (In-Memory check)
+        # Проверяем по resume_id (ключевой инвариант)
         if self.repository.exists(preview.resume_id):
             logger.debug(f"   Skipping existing ID: {preview.resume_id}")
             return
@@ -146,30 +144,50 @@ class CrawlerService:
 
         # 3. Скачивание детальной страницы
         try:
-            html = self.fetcher.get(preview.url)
+            html_content = self.fetcher.get(preview.url)
+            if not html_content:
+                logger.warning(f"   Empty content for detail {preview.url}")
+                self.stats.errors_detail += 1
+                return
         except Exception as e:
             logger.error(f"   Failed to fetch detail {preview.url}: {e}")
             self.stats.errors_detail += 1
             return
 
-        page_type = BaseParser(html, preview.url).page_type
-
-        # 4. Safety Checks
-        if page_type == PageType.NOT_FOUND:
+        # 4. Проверка статуса (Safety Checks)
+        base_parser = BaseParser(html_content, preview.url)
+        
+        # Если 404 - это не критично, просто пропускаем кандидата
+        if base_parser.page_type == PageType.NOT_FOUND:
             logger.warning(f"   Resume not found (404): {preview.url}")
             return
-
-        if not self._check_page_safety(page_type, context="DETAIL"):
+            
+        # Если Бан/Капча - это критично для всей сессии
+        if not self._check_page_safety(base_parser.page_type, context="DETAIL"):
             return
 
-        # 5. Парсинг детальной страницы (используем raw html, без double-parsing)
-        result = ResumeParser(html, preview.url).parse()
+        # 5. Парсинг детальной страницы
+        resume_parser = ResumeParser(html_content, preview.url)
+        result = resume_parser.parse()
 
-        # Сохраняем (payload здесь ResumeDetailData)
-        if result.payload:
-            self.repository.save_candidate(result.payload)
+        if result.quality == DataQuality.ERROR:
+            logger.warning(f"   Parser Error for {preview.resume_id}: {result.error_message}")
+            self.stats.errors_detail += 1
+            return
+
+        # 6. Сохранение результата
+        try:
+            # Используем актуальный метод репозитория save_result(ParsingResult)
+            self.repository.save_result(result)
             self.stats.candidates_saved += 1
-            logger.info(f"   ✅ Saved: {result.payload.name} ({result.payload.title})")
+            
+            # Логируем имя для наглядности (если распарсилось)
+            candidate_name = result.payload.name if result.payload else "Unknown"
+            candidate_title = result.payload.title if result.payload else "Unknown Title"
+            logger.info(f"   ✅ Saved: {candidate_name} ({candidate_title})")
+            
+        except Exception as e:
+            logger.error(f"   Failed to save result for {preview.resume_id}: {e}")
 
     def _check_page_safety(self, page_type: PageType, context: str) -> bool:
         """
