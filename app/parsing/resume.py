@@ -57,6 +57,11 @@ class ResumeParser(BaseParser):
             # ВАЖНО: по отчету Work.ua часть ключевых элементов (например H1) находится вне div#resume_*
             # поэтому секции сканируем по всему документу
             self._scan_sections(self.soup, data)
+            # 4.1 Извлечение "монолитного текста" (часто из прикреплённого файла)
+            add_info_text = self._extract_add_info_text(self.soup)
+            if add_info_text:
+                data.about_raw = add_info_text
+
 
             # 5. Валидация
             quality = DataQuality.COMPLETE
@@ -256,3 +261,50 @@ class ResumeParser(BaseParser):
             if txt:
                 unique_skills.add(txt)
         data.skills = list(unique_skills)
+    
+    def _extract_add_info_text(self, container: Tag | BeautifulSoup) -> Optional[str]:
+        """
+        Извлекает монолитный текст резюме из блока #add_info (Work.ua часто так рендерит резюме,
+        созданные на основе прикреплённого файла).
+
+        Требования:
+        - детерминированно
+        - без попыток "разметить" на experience/education/skills
+        - максимально чистый текст, пригодный для evidence в пункте 6
+        """
+        block = container.select_one(CSS.RESUME_ADD_INFO)
+        if not block:
+            return None
+
+        # Удаляем "служебные" элементы, которые не несут смысловой нагрузки
+        for el in block.select(".hidden-print"):
+            el.decompose()
+
+        # Берём текст с сохранением переносов
+        text = block.get_text(separator="\n", strip=True)
+
+        if not text:
+            return None
+
+        # Чистка мусора: NBSP, form-feed, множественные пустые строки
+        text = text.replace("\xa0", " ").replace("\f", "\n")
+
+        # Убираем слишком частые "відкрити контакти" (они часто встраиваются в этот блок)
+        text = re.sub(r"\bвідкрити контакти\b", "", text, flags=re.IGNORECASE)
+
+        # Нормализация пустых строк
+        lines = [ln.strip() for ln in text.splitlines()]
+        # Удаляем полностью пустые строки на концах, но оставляем смысловые разрывы
+        cleaned: List[str] = []
+        last_empty = False
+        for ln in lines:
+            if not ln:
+                if not last_empty:
+                    cleaned.append("")
+                last_empty = True
+                continue
+            cleaned.append(ln)
+            last_empty = False
+
+        final = "\n".join(cleaned).strip()
+        return final if final else None

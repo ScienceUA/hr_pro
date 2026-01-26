@@ -53,6 +53,10 @@ class CSS:
     RESUME_H1 = "h1"                   # Имя
     RESUME_POSITION = "h2.title-print" # Должность
     
+    # Монолитный текст резюме (часто для резюме из прикреплённого файла)
+    RESUME_ADD_INFO = "div#add_info.wordwrap, div.wordwrap#add_info"
+
+    
     # Зарплата
     RESUME_SALARY_BLOCK = "ul.list-unstyled > li.no-style"
     
