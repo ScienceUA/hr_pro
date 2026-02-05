@@ -1,0 +1,26 @@
+{
+  "url": "https://www.work.ua/resumes/10444242/",
+  "page_type": "resume",
+  "parsed_at": "2026-01-16T15:24:27.473466Z",
+  "payload": {
+    "resume_id": "10444242",
+    "url": "https://www.work.ua/resumes/10444242/",
+    "name": "Альона",
+    "title": "Python-програміст",
+    "age": null,
+    "city": null,
+    "salary": {
+      "amount": 16,
+      "currency": "UAH",
+      "comment": null
+    },
+    "skills": [],
+    "experience": [],
+    "education": [],
+    "about_raw": null,
+    "has_hidden_contacts": true
+  },
+  "next_page_url": null,
+  "quality": "complete",
+  "error_message": null
+}

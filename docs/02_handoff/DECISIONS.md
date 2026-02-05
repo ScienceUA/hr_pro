@@ -73,6 +73,24 @@
 
 Инвариант: агент управляет логикой и анализом, но не вмешивается в транспорт/парсинг/оркестрацию сбора данных.
 
+## Invariant: Parsing source of truth (runtime)
+
+SOURCE OF TRUTH для runtime-парсинга в Local MVP:
+
+- `app/parsing/resume.py`
+- `app/parsing/serp.py`
+
+Файлы `app/execution/resume_page.py` и `app/execution/search_page.py` являются legacy artifacts
+(перенесены из раннего `scripts/scraper/` слоя) и **не считаются** источником истины.
+
+Запрещено:
+- использовать `app/execution/*_page.py` как основу для исправлений runtime-парсинга,
+- добавлять новые зависимости runtime на `app/execution/*_page.py`,
+- развивать/рефакторить legacy слой в рамках закрытых пунктов 1–5.
+
+Если когда-либо потребуется уборка/удаление legacy (`app/execution/*_page.py`),
+это делается только в рамках отдельного пункта плана, с явной фиксацией решения в DECISIONS.md.
+
 ## 7. Запреты до завершения пункта 6
 
 До завершения пункта 6 запрещено:

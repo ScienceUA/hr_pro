@@ -1,0 +1,13 @@
+{
+  "verdict": "CONDITIONAL",
+  "reasoning": "Missing explicit evidence for some must-have criteria.",
+  "evidence": [],
+  "missing_criteria": [
+    "(example) missing criterion placeholder"
+  ],
+  "interview_questions": [
+    "Describe a project where you managed conflicting stakeholder expectations. What did you do?",
+    "Which project management framework do you use (Scrum/Kanban/Waterfall) and why?",
+    "Give an example of a risk you identified early and how you mitigated it."
+  ]
+}

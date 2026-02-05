@@ -1,0 +1,13 @@
+{
+  "must": [
+    "Project management experience"
+  ],
+  "must_not": [
+    "Full-time onsite only"
+  ],
+  "semantic": [
+    "communication",
+    "leadership"
+  ],
+  "notes": "Temporary test CriteriaBundle. Replace with real 6.1 output later."
+}
