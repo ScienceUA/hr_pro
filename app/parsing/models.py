@@ -95,11 +95,14 @@ class ResumeDetailData(BaseResumeData):
     salary: Optional[SalaryDTO] = None
     
     # Lists (Default empty list, NEVER None)
+    considered_positions: List[str] = Field(default_factory=list)
     skills: List[str] = Field(default_factory=list)
     experience: List[ExperienceEntryDTO] = Field(default_factory=list)
     education: List[EducationEntryDTO] = Field(default_factory=list)
     
     about_raw: Optional[str] = None
+    has_uploaded_file: bool = False
+    uploaded_file_url: Optional[str] = None
     
     # Flags (Состояние контента)
     has_hidden_contacts: bool = False
@@ -130,6 +133,7 @@ class ParsingResult(BaseModel):
     
     # Метаданные списка (только для SERP)
     next_page_url: Optional[str] = None
+    total_found: Optional[int] = None
     
     quality: Optional[DataQuality] = None
     error_message: Optional[str] = None

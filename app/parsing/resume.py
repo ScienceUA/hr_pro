@@ -61,6 +61,36 @@ class ResumeParser(BaseParser):
             add_info_text = self._extract_add_info_text(self.soup)
             if add_info_text:
                 data.about_raw = add_info_text
+            
+            considered = self._extract_considered_positions(self.soup)
+            if considered:
+                data.considered_positions = considered
+
+            # 4.2 Проверка наличия прикреплённого файла
+            has_uploaded_file = False
+            file_url = None
+
+            # Проверка ссылок на скачивание
+            file_link = self.soup.select_one(CSS.RESUME_FILE_DOWNLOAD_ORIGINAL) \
+                or self.soup.select_one(CSS.RESUME_FILE_DOWNLOAD_PDF)
+
+            if file_link:
+                has_uploaded_file = True
+                file_url = file_link.get("href")
+
+            # Проверка превью страниц файла
+            preview_block = self.soup.select_one(CSS.RESUME_FILE_PREVIEW_CONTAINER)
+            if preview_block:
+                has_uploaded_file = True
+
+            # Предупреждение о файле
+            warning_block = self.soup.select_one(CSS.RESUME_FILE_WARNING)
+            if warning_block:
+                has_uploaded_file = True
+
+            # Сохраняем в модель
+            data.has_uploaded_file = has_uploaded_file
+            data.uploaded_file_url = file_url
 
 
             # 5. Валидация
@@ -108,6 +138,48 @@ class ResumeParser(BaseParser):
             
         raise ValueError("resume_id not found")
 
+    def _extract_considered_positions(self, soup) -> list[str]:
+        """
+        Extracts Work.ua block: 'Розглядає посади:' -> 'CMO, ...'
+        Pattern: <span class="dt-print">Розглядає посади:</span>
+                 next <tr> contains <span class="dt-print-desc">...</span>
+        """
+        label = soup.select_one(CSS.RESUME_CONSIDERS_LABEL)
+        if not label:
+            return []
+
+        label_text = label.get_text(" ", strip=True)
+        if "Розглядає посади" not in label_text:
+            # There are many dt-print labels; we only need this one
+            # So we scan all dt-print and match the correct one.
+            for cand in soup.select(CSS.RESUME_CONSIDERS_LABEL):
+                t = cand.get_text(" ", strip=True)
+                if "Розглядає посади" in t:
+                    label = cand
+                    break
+            else:
+                return []
+
+        tr = label.find_parent("tr")
+        if not tr:
+            return []
+
+        next_tr = tr.find_next_sibling("tr")
+        if not next_tr:
+            return []
+
+        val = next_tr.select_one(CSS.RESUME_CONSIDERS_VALUE)
+        if not val:
+            return []
+
+        text = val.get_text(" ", strip=True)
+        if not text:
+            return []
+
+        # Split by comma, normalize
+        parts = [p.strip() for p in text.split(",")]
+        return [p for p in parts if p]
+    
     def _extract_salary(self) -> Optional[SalaryDTO]:
         raw_text = self._get_text_safe(self.soup, CSS.RESUME_SALARY_BLOCK)
         

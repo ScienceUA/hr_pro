@@ -56,24 +56,43 @@ class SerpParser(BaseParser):
                 logger.warning(f"Failed to parse SERP item: {e}")
                 continue
 
-        # 3. Пагинация (строгая логика)
+        # 3. Пагинация (строгая логика: только rel='next')
         next_page = None
-        links = self.soup.select(CSS.SERP_NEXT_PAGE)
-        if links:
-            href = links[0].get("href")
-            if href:
-                next_page = urljoin(self.url, href)
+        a = self.soup.select_one(CSS.SERP_NEXT_PAGE)
+        if a and a.get("href"):
+            next_page = urljoin(self.url, a["href"])
 
         # 4. Формирование результата
         # Если карточки были найдены, считаем COMPLETE, иначе PARTIAL
         quality = DataQuality.COMPLETE if items else DataQuality.PARTIAL
-        
+
+        # --- total_found: пытаемся вытащить реальное число результатов ---
+        total_found = None
+        try:
+            # Берём весь текст страницы и ищем наиболее “похоже на count”
+            # Пример: "Знайдено 481 резюме", "481 кандидат", "Резюме (481)" и т.п.
+            text = self.soup.get_text(" ", strip=True)
+
+            # Ищем числа с пробелами/nbsp: "1 234"
+            nums = re.findall(r"\b\d[\d\s\u00A0]{0,10}\b", text)
+            candidates = []
+            for s in nums:
+                n = int(s.replace(" ", "").replace("\u00A0", ""))
+                # фильтр от мусора интерфейса
+                if n >= 20:
+                    candidates.append(n)
+            if candidates:
+                total_found = max(candidates)
+        except Exception:
+            total_found = None
+
         return ParsingResult(
             url=self.url,
             page_type=PageType.SERP,
             payload=items,
             next_page_url=next_page,
-            quality=quality
+            total_found=total_found,
+            quality=quality,
         )
 
     def _parse_item(self, card_element) -> Optional[ResumePreviewData]:

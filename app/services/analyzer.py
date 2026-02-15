@@ -42,6 +42,18 @@ class ResumeAnalyzer:
     # -----------------
 
     def analyze(self, resume_json: Dict[str, Any], criteria_bundle: Dict[str, Any]) -> AnalysisResult:
+        position = (resume_json.get("payload", {}).get("title") or "").lower()
+        search_role = (criteria_bundle.get("role") or "").lower()
+
+        if search_role and position:
+            if search_role not in position:
+                return AnalysisResult(
+                    verdict="REJECT",
+                    evidence=[],
+                    missing_criteria=["Посада кандидата не відповідає ролі пошуку."],
+                    interview_questions=[]
+                )
+
         messages = self.prepare_prompt(resume_json=resume_json, criteria_bundle=criteria_bundle)
         raw = self.call_llm(messages)
         return self.parse_response(raw)
@@ -59,15 +71,39 @@ class ResumeAnalyzer:
         criteria_payload = criteria_bundle
 
         user_content = (
-            "You will evaluate the candidate resume against the criteria_bundle.\n"
-            "Return ONLY one JSON object matching the AnalysisResult schema.\n\n"
+            "You will evaluate the candidate resume against the criteria_bundle.\n\n"
+
+            "CRITICAL PROCESS (follow strictly):\n"
+            "STEP 1 — Extract factual signals from resume_content.\n"
+            "  Extract concrete facts only (not assumptions):\n"
+            "  - roles and job titles\n"
+            "  - tools and platforms (e.g., Meta Ads, Google Ads, TikTok Ads, Python)\n"
+            "  - measurable metrics (ROI, CAC, CTR, budgets, % improvements)\n"
+            "  - years of experience\n"
+            "  - industries or domains\n\n"
+
+            "STEP 2 — Compare extracted signals ONLY with criteria_bundle.\n"
+            "  - Match required criteria.\n"
+            "  - Identify missing criteria.\n"
+            "  - Do not invent data.\n\n"
+
+            "STEP 3 — Produce ONE JSON object matching AnalysisResult schema.\n\n"
+
+            "STRICT OUTPUT RULES:\n"
+            "1) Output MUST be valid JSON only.\n"
+            "2) No markdown, no explanations, no comments.\n"
+            "3) All natural-language strings MUST be in Ukrainian.\n"
+            "4) Every positive claim MUST be backed by a verbatim quote from resume_content.\n\n"
+
             "criteria_bundle (data):\n"
             f"{json.dumps(criteria_payload, ensure_ascii=False, indent=2)}\n\n"
-            "resume_content (data, isolated):\n"
+
+            "resume_content (data):\n"
             "<resume_content>\n"
             f"{resume_text}\n"
             "</resume_content>\n"
         )
+
 
         return [
             {"role": "system", "content": self._system_prompt},
@@ -108,40 +144,104 @@ class ResumeAnalyzer:
 
     def _optimize_resume_data(self, resume_json: Dict[str, Any]) -> str:
         """
-        Token economy:
-          Build compact Markdown from significant fields only:
-          - Title (position/candidate_title/title)
-          - Skills
-          - Experience
-          - Education
+        Build resume_content for LLM analysis.
 
-        Hard rules:
-          - DO NOT send raw HTML
-          - DO NOT send service fields (cookies, headers, raw responses, etc.)
+        Requirement:
+        - resume_content MUST include BOTH:
+            (1) structured fields (title/skills/experience/education, if present)
+            (2) full free-text blocks, especially Work.ua payload.about_raw
+        - No heuristic thresholds; always compose everything available.
         """
-        title = self._pick_first_str(resume_json, ["title", "position", "candidate_title"])
-        skills = self._pick_skills(resume_json)
-        experience = self._pick_experience(resume_json)
-        education = self._pick_education(resume_json)
+        payload = resume_json.get("payload")
+        if isinstance(payload, dict):
+            resume_json = payload
 
-        parts: List[str] = []
-        if title:
-            parts.append("# Title\n" + title.strip())
+        # -------------------------
+        # 1) Structured components
+        # -------------------------
+        structured_parts: list[str] = []
 
-        if skills:
-            parts.append("# Skills\n" + "\n".join(f"- {s}" for s in skills))
+        def _first_nonempty_str(*keys: str) -> str:
+            for k in keys:
+                v = resume_json.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+            return ""
 
-        if experience:
-            parts.append("# Experience\n" + "\n\n".join(experience))
+        position = _first_nonempty_str("title", "position", "candidate_title")
 
-        if education:
-            parts.append("# Education\n" + "\n\n".join(education))
+        # Доп. ролі, які кандидат розглядає (ми зберігаємо їх у payload як considered_positions)
+        considered = resume_json.get("considered_positions") or []
 
-        # If nothing extracted, we still return a minimal marker so model can't hallucinate.
-        if not parts:
-            return "# Resume\n(no extractable content)"
+        position_lines: list[str] = []
+        if position:
+            position_lines.append(position)
 
-        return "\n\n".join(parts)
+        if isinstance(considered, list) and considered:
+            # пример: ["Head of digital", "Керівник напрямку", ...]
+            position_lines.append("Розглядає посади: " + "; ".join([str(x).strip() for x in considered if str(x).strip()]))
+        elif isinstance(considered, str) and considered.strip():
+            position_lines.append("Розглядає посади: " + considered.strip())
+
+        if position_lines:
+            structured_parts.append("POSITION:\n" + "\n".join(position_lines) + "\n")
+
+        def _add_section(name: str, value: Any) -> None:
+            if value is None:
+                return
+            if isinstance(value, str) and value.strip():
+                structured_parts.append(f"{name}:\n{value.strip()}")
+                return
+            if isinstance(value, list) and value:
+                structured_parts.append(f"{name}:\n{json.dumps(value, ensure_ascii=False, indent=2)}")
+                return
+            if isinstance(value, dict) and value:
+                structured_parts.append(f"{name}:\n{json.dumps(value, ensure_ascii=False, indent=2)}")
+                return
+
+        _add_section("SKILLS", resume_json.get("skills"))
+        _add_section("EXPERIENCE", resume_json.get("experience"))
+        _add_section("EDUCATION", resume_json.get("education"))
+        _add_section("LANGUAGES", resume_json.get("languages"))
+        _add_section("CERTIFICATIONS", resume_json.get("certifications"))
+
+        structured_text = "\n\n".join(structured_parts).strip()
+
+        # -------------------------
+        # 2) Full-text components
+        # -------------------------
+        # Critical: Work.ua “uploaded file / quick view” lives in about_raw
+        full_text_fields = [
+            "about_raw",              # ✅ key you confirmed exists and contains full text
+            "full_text",
+            "raw_text",
+            "content",
+            "description",
+            "text",
+            "version_for_quick_view",
+            "quick_view",
+            "summary",
+        ]
+
+        full_chunks: list[str] = []
+        for k in full_text_fields:
+            v = resume_json.get(k)
+            if isinstance(v, str) and v.strip():
+                full_chunks.append(f"[{k}]\n{v.strip()}")
+
+        full_text = "\n\n".join(full_chunks).strip()
+
+        # -------------------------
+        # 3) Final composite
+        # -------------------------
+        final_parts: list[str] = []
+        if structured_text:
+            final_parts.append("=== STRUCTURED ===\n" + structured_text)
+        if full_text:
+            final_parts.append("=== FULL_TEXT ===\n" + full_text)
+
+        return "\n\n".join(final_parts) if final_parts else "NO_RESUME_TEXT_AVAILABLE"
+
 
     def _sanitize_text(self, text: str) -> str:
         """

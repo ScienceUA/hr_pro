@@ -14,6 +14,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
+UA_PREVIEW_PROMPT = (
+    "Знайдено {total} резюме за запитом: «{query}».\n"
+    "Якщо ви згодні обробити ВСІ {total} резюме — введіть команду: далі\n"
+    "Якщо хочете звузити пошук — введіть уточнений запит текстом.\n"
+)
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -21,24 +27,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 # -----------------------------
-# Imports from app/ (must exist)
+# Imports from app/ (lazy in main)
 # -----------------------------
-try:
-    from app.services.analyzer import ResumeAnalyzer  # 6.3
-except Exception as e:
-    raise SystemExit(f"❌ Cannot import ResumeAnalyzer from app.services.analyzer: {e}")
+ResumeAnalyzer = None  # type: ignore
+ReportGenerator = None  # type: ignore
+real_llm_chat = None  # type: ignore
+RealLLMNotConfigured = RuntimeError  # type: ignore
 
-try:
-    from app.services.report_generator import ReportGenerator  # 6.4
-except Exception as e:
-    raise SystemExit(f"❌ Cannot import ReportGenerator from app.services.report_generator: {e}")
-
-try:
-    # Optional: real LLM adapter (may be not configured yet)
-    from app.services.llm_client import real_llm_chat, RealLLMNotConfigured
-except Exception:
-    real_llm_chat = None  # type: ignore
-    RealLLMNotConfigured = RuntimeError  # type: ignore
 
 
 # -----------------------------
@@ -92,16 +87,11 @@ def mock_llm(messages: Sequence[Dict[str, str]]) -> str:
             "verdict": "CONDITIONAL",
             "reasoning": "Mock output (Fast mode). Not based on resume content.",
             "evidence": [],
-            "missing_criteria": ["(mock) missing criterion placeholder"],
-            "interview_questions": [
-                "Опишите пример, где вы управляли конфликтующими ожиданиями стейкхолдеров. Что вы сделали?",
-                "Какой фреймворк управления (Scrum/Kanban/Waterfall) вы используете и почему?",
-                "Приведите пример риска, который вы выявили заранее, и как вы его mitigated."
-            ],
+            "missing_criteria": [],
+            "interview_questions": [],
         },
         ensure_ascii=False,
     )
-
 
 # -----------------------------
 # Helper: JSONL I/O
@@ -324,7 +314,7 @@ def parse_args() -> argparse.Namespace:
         "--query", "-q",
         type=str,
         default=None,
-        help="Search query (e.g., 'Python Kyiv'). If not provided, will prompt interactively.",
+        help="User raw query (free text). If not provided, will prompt interactively.",
     )
     parser.add_argument(
         "--mode", "-m",
@@ -333,10 +323,28 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="LLM mode: 'fast' or '1' for mock LLM, 'real' or '2' for real LLM. If not provided, will prompt.",
     )
+    parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=None,
+        help="How many resumes to analyze from the TOP of search results. If omitted -> analyze ALL found.",
+    )
+    parser.add_argument(
+        "--pages", "-p",
+        type=int,
+        default=None,
+        help="How many SERP pages to crawl (default: 1). Each page ~20 resumes.",
+    )
+    parser.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        default=False,
+        help="Auto-confirm prompts (non-interactive mode).",
+    )
     return parser.parse_args()
 
 
-def main() -> None:
+def main() -> int:
     args = parse_args()
 
     print("HR-Pro Agent Runner (Stage 6 pipeline)")
@@ -362,11 +370,32 @@ def main() -> None:
         mode = prompt("Введите 1 или 2: ")
 
     use_real = (mode in ("2", "real"))
+    
+    # Fail-fast contract: real mode requires GEMINI_API_KEY
+    if use_real and not os.environ.get("GEMINI_API_KEY"):
+        raise SystemExit("❌ Real mode requires GEMINI_API_KEY. Pass it via ENV (e.g., -e GEMINI_API_KEY).")
+
+    # Lazy imports: only after CLI parsing and mode selection
+    global ResumeAnalyzer, ReportGenerator, real_llm_chat, RealLLMNotConfigured
+
+    try:
+        from app.services.analyzer import ResumeAnalyzer as _ResumeAnalyzer  # 6.3
+        from app.services.report_generator import ReportGenerator as _ReportGenerator  # 6.4
+        ResumeAnalyzer = _ResumeAnalyzer
+        ReportGenerator = _ReportGenerator
+    except Exception as e:
+        raise SystemExit(f"❌ Cannot import core services from app/: {e}")
+
     llm_chat = mock_llm
     if use_real:
-        if real_llm_chat is None:
-            raise SystemExit("❌ Real mode выбран, но app.services.llm_client не импортируется.")
+        try:
+            from app.services.llm_client import real_llm_chat as _real_llm_chat, RealLLMNotConfigured as _RealLLMNotConfigured
+            real_llm_chat = _real_llm_chat
+            RealLLMNotConfigured = _RealLLMNotConfigured
+        except Exception as e:
+            raise SystemExit(f"❌ Real mode выбран, но app.services.llm_client не импортируется: {e}")
         llm_chat = real_llm_chat  # type: ignore
+
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = PROJECT_ROOT / "out"
@@ -382,22 +411,99 @@ def main() -> None:
     search_payload = dict(interpretation.search_payload)
     search_payload.setdefault("out", str(out_dir / f"result_{ts}.jsonl"))
 
+    # CLI overrides (simple & explicit)
+    # 1) pages: directly controls how many resumes are DOWNLOADED by Local MVP
+    if args.pages is not None:
+        if args.pages < 1:
+            raise SystemExit("❌ --pages must be >= 1")
+        search_payload["pages"] = args.pages
+
+    # 2) limit -> pages heuristic (optional, helps reduce downloading)
+    # If user sets --limit but not --pages, we approximate pages assuming ~10 results per page.
+    # This reduces download volume BEFORE crawling.
+    if args.limit is not None and args.pages is None:
+        if args.limit < 1:
+            raise SystemExit("❌ --limit must be >= 1")
+        per_page = int(os.getenv("HRPRO_RESULTS_PER_PAGE", "10"))
+        approx_pages = max(1, (args.limit + per_page - 1) // per_page)
+        search_payload["pages"] = approx_pages
+
     print(f"✅ Интерпретация завершена за {time.time() - t0:.2f}s")
 
-    # ---------------- Step 2: Search & Crawl (Local MVP) ----------
-    print("🔍 Step 2/4: Поиск и сбор резюме (Local MVP)...")
+    # ---------------- Step 2: Preview (count + urls) + Confirm + Crawl ---------
+    print("🔍 Step 2/4: Preview (підрахунок) + підтвердження + збір резюме...")
+
     out_path = search_payload.get("out", str(out_dir / f"result_{ts}.jsonl"))
     crawler = load_crawler_service(out_path)
 
-    t1 = time.time()
-    try:
-        jsonl_path = call_crawler(crawler, search_payload)
-    except Exception as e:
-        raise SystemExit(f"❌ Ошибка на этапе Search & Crawl: {e}")
+    # limit rule: if omitted -> process ALL found
+    user_limit = args.limit  # None => ALL
 
-    resumes = read_jsonl(jsonl_path)
-    print(f"✅ Краулинг завершён за {time.time() - t1:.2f}s")
-    print(f"🔍 Найдено {len(resumes)} резюме: {jsonl_path}")
+    # ---- Phase 1: Preview loop ----
+    while True:
+        # 2.1 Получаем preview от краулера: total_found + отсортированные URL резюме (сверху вниз)
+        # ВАЖНО: это НОВЫЙ метод, его нужно добавить в CrawlerService (см. ниже).
+        preview = crawler.preview(search_payload)  # returns {"total_found": int, "urls": [str, ...]}
+
+        total_found = int(preview.get("total_found", 0))
+        urls = preview.get("urls") or []
+
+        # Если preview почему-то не дал urls, считаем это ошибкой
+        if total_found <= 0 or not isinstance(urls, list) or not urls:
+            raise SystemExit("ℹ️ 0 резюме. Краулер мог бути заблокований або пошук не дав результатів.")
+
+        # Определяем, сколько будем обрабатывать
+        target_count = total_found if user_limit is None else min(user_limit, total_found)
+
+        # 2.2 Если найдено >= 20 — просим подтвердить "далі" или уточнить запрос (украинский текст)
+        if total_found >= 20:
+            # Auto-confirm if --yes flag is set
+            if args.yes:
+                print(f"⏩ Auto-confirming (--yes): processing {target_count} resumes")
+                selected_urls = urls[:target_count]
+                break
+
+            print(
+                UA_PREVIEW_PROMPT.format(
+                    total=total_found,
+                    query=search_payload.get("query", "")
+                )
+            )
+            user_input = input("> ").strip()
+
+            if user_input.lower() == "далі":
+                selected_urls = urls[:target_count]
+                break
+
+            # Иначе это уточнение запроса -> прогоняем Step 1 заново (интерпретация)
+            user_query = user_input
+            print("🧩 Step 1/4: Інтерпретація уточненого запиту...")
+            t0 = time.time()
+            interpretation = interpreter(user_query)
+
+            search_payload = dict(interpretation.search_payload)
+            search_payload.setdefault("out", str(out_dir / f"result_{ts}.jsonl"))
+
+            # Сохраняем текущий --limit (если был)
+            # (pages здесь не ставим: preview сам должен пройти пагинацию до конца при отсутствии limit)
+            print(f"✅ Інтерпретація завершена за {time.time() - t0:.2f}s")
+            continue
+
+        # Если < 20 — подтверждение не спрашиваем
+        selected_urls = urls[:target_count]
+        break
+
+    # ---- Phase 2: Crawl строго по выбранным URL ----
+    print(f"🧾 До збору: {len(selected_urls)} резюме з {total_found} знайдених.")
+    t1 = time.time()
+
+    # ВАЖНО: это НОВЫЙ метод, его нужно добавить в CrawlerService (см. ниже).
+    # Он должен скачать детальные страницы только по этим URL и записать JSONL в out_path.
+    jsonl_path = crawler.run_from_urls(selected_urls, out=str(out_path))
+
+    resumes = read_jsonl(Path(jsonl_path))
+    print(f"✅ Збір завершено за {time.time() - t1:.2f}s")
+    print(f"🔍 Зібрано {len(resumes)} резюме: {jsonl_path}")
 
     if not resumes:
         raise SystemExit("ℹ️ 0 резюме. Отчёт не сформирован.")
@@ -437,7 +543,10 @@ def main() -> None:
 
     # Reporter expects AnalysisResult objects; if fail-soft dicts exist, try to validate
     validated_analyses: List[Any] = []
-    from app.models.agent import AnalysisResult  # local import after path setup
+    try:
+        from app.models.agent import AnalysisResult  # local import (runtime only)
+    except Exception as e:
+        raise SystemExit(f"❌ Cannot import AnalysisResult: {e}")
     for a in analyses:
         if isinstance(a, dict):
             validated_analyses.append(AnalysisResult.model_validate(a))
@@ -460,7 +569,8 @@ def main() -> None:
         print("ℹ️ PDF не создан (reportlab недоступен или ошибка рендера). Markdown готов.")
 
     print("🎉 Готово.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
