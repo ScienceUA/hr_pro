@@ -4,66 +4,112 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
-
+from app.services.llm_client import real_llm_chat # Підключаємо LLM для аналізу критеріїв
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKUA_MAP_PATH = PROJECT_ROOT / "app" / "config" / "workua_filters_map.json"
 
 
 def interpret_query(user_text: str) -> dict:
-    """
-    Runtime entrypoint for Stage 6.1 (Interpretation).
-
-    MUST return:
-      {
-        "criteria_bundle": {...},
-        "search_payload": {
-            "query": str,
-            "city": Optional[str],     # Work.ua city slug (e.g. "kyiv") if confidently detected
-            "pages": int,
-            "out": str,
-            "params": dict             # raw Work.ua URL params
-        }
-      }
-
-    Baseline behavior (safe, deterministic):
-      - Extracts query text and (optionally) city slug from user_text.
-      - Does NOT invent skills/criteria.
-      - Does NOT apply filters unless explicitly detected and validated.
-    """
     user_text = (user_text or "").strip()
     if not user_text:
         raise ValueError("interpret_query: empty user_text")
 
-    # 1) Load Work.ua map if present (optional but preferred)
+    # 1) Load Work.ua map
     workua_map = _try_load_workua_map()
 
     # 2) Parse (query, city)
     query_text, city_slug = _extract_query_and_city(user_text, workua_map)
 
-    # 3) Build CriteriaBundle (baseline: only what is explicitly known)
-    #    This keeps pipeline deterministic and avoids hallucination.
+    # 3) Extract experience from query
+    experience_code = None
+    experience_patterns = [
+        (r"понад 5|більше 5|5\+|6\+|7\+", "166"),     # Понад 5 років
+        (r"від 2 до 5|2-5|3-5|4-5", "165"),            # Від 2 до 5 років
+        (r"від 1 до 2|1-2", "164"),                    # Від 1 до 2 років
+        (r"до 1|менше 1|0-1", "1"),                    # До 1 року
+        (r"без досвіду|немає досвіду", "0"),          # Без досвіду
+    ]
+    
+    for pattern, code in experience_patterns:
+        if re.search(pattern, user_text, re.IGNORECASE):
+            experience_code = code
+            query_text = re.sub(pattern, "", query_text, flags=re.IGNORECASE).strip()
+            break
+    
+    query_text = re.sub(r"\s+", " ", query_text).strip()
+
+    # 4) Extract role keywords for Work.ua search
+    # Work.ua НЕ має фільтру "категорія резюме" — тільки ключові слова
+    # Витягуємо перші 2-3 ключові слова як пошуковий запит
+    
+    tokens = query_text.lower().split()
+    
+    # Видаляємо стоп-слова (службові слова)
+    stop_words = {"з", "по", "для", "та", "і", "в", "на", "у", "роботи", "досвід", "років", "роки", "рік"}
+    keywords = [t for t in tokens if t not in stop_words and len(t) > 2]
+    
+    # Беремо перші 2-3 ключові слова для пошуку
+    search_keywords = keywords[:3] if len(keywords) >= 3 else keywords[:2] if len(keywords) >= 2 else keywords
+    
+    # Все інше — семантичні критерії для LLM
+    semantic_keywords = keywords[len(search_keywords):]
+    
+    search_query = " ".join(search_keywords)
+    semantic_criteria = semantic_keywords
+
+    # 5) Build CriteriaBundle: інтелектуальний поділ на обов'язкові (must) та бажані (semantic) критерії
+    extraction_prompt = (
+        "Проаналізуй повний текст вакансії та чітко розділи вимоги.\n"
+        "Поверни ТІЛЬКИ валідний JSON у форматі:\n"
+        "{\n"
+        '  "role": "коротка назва посади для пошуку на Work.ua (1-3 слова)",\n'
+        '  "must": ["список ТІЛЬКИ обов\'язкових вимог (must-have, вимагається, обов\'язково, від X років)"],\n'
+        '  "semantic": ["список бажаних вимог (буде плюсом, бажано, вітається)"]\n'
+        "}\n"
+        "Ніякого markdown чи іншого тексту."
+    )
+    
+    try:
+        llm_response = real_llm_chat([
+            {"role": "system", "content": extraction_prompt},
+            {"role": "user", "content": user_text}
+        ])
+        # Очищення від можливих markdown-тегів
+        clean_json_str = llm_response.strip('` \n').replace('json\n', '')
+        parsed_criteria = json.loads(clean_json_str)
+    except Exception as e:
+        # Fallback, якщо LLM не відповів коректно або виникла помилка
+        parsed_criteria = {
+            "role": matched_category if matched_category else query_text,
+            "must": [],
+            "semantic": [user_text]
+        }
+
     criteria_bundle: Dict[str, Any] = {
-        "must": [],
+        "must": parsed_criteria.get("must", []),
         "must_not": [],
-        "semantic": [],
-        "role_anchors": [query_text] if query_text else [],
+        "semantic": parsed_criteria.get("semantic", []),
+        "role_anchors": [parsed_criteria.get("role", "")],
         "uncertainties": [],
         "source_query": user_text,
     }
 
-    if not query_text:
-        criteria_bundle["uncertainties"].append("Could not extract query terms from user input.")
+    # Оновлюємо query_text для Work.ua ТІЛЬКИ роллю, щоб краулер шукав точно
+    query_text = parsed_criteria.get("role", query_text)
+    search_query = query_text
 
-    # 4) Build Search payload (flat, CLI-compatible)
-    #    params must be RAW Work.ua URL params.
+    # 6) Build Search payload
     search_payload: Dict[str, Any] = {
-        "query": query_text if query_text else user_text,
+        "query": search_query,
         "city": city_slug,
         "pages": 3,
         "out": "result.jsonl",
         "params": {},
     }
+    
+    if experience_code:
+        search_payload["params"]["experience"] = experience_code
 
     return {"criteria_bundle": criteria_bundle, "search_payload": search_payload}
 

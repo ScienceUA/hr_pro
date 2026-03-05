@@ -1,13 +1,12 @@
 from __future__ import annotations
-
 import json
+import logging
 import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
-
 from pydantic import ValidationError
-
 from app.models.agent import AnalysisResult
 
+logger = logging.getLogger(__name__)
 
 class ResumeAnalyzerError(RuntimeError):
     pass
@@ -41,20 +40,40 @@ class ResumeAnalyzer:
     # Public API
     # -----------------
 
-    def analyze(self, resume_json: Dict[str, Any], criteria_bundle: Dict[str, Any]) -> AnalysisResult:
-        position = (resume_json.get("payload", {}).get("title") or "").lower()
-        search_role = (criteria_bundle.get("role") or "").lower()
-
-        if search_role and position:
-            if search_role not in position:
-                return AnalysisResult(
-                    verdict="REJECT",
-                    evidence=[],
-                    missing_criteria=["Посада кандидата не відповідає ролі пошуку."],
-                    interview_questions=[]
-                )
-
+    def analyze(self, resume_json: Dict[str, Any], criteria_bundle: Dict[str, Any]) -> Optional[AnalysisResult]:
+        # ПРОВЕРКА 1: Защищённое резюме (требуется авторизация)
+        page_type = resume_json.get("page_type", "").upper()
+        if page_type in ("LOGIN", "PROTECTED"):
+            logger.info(f"Protected resume detected: {resume_json.get('url', 'UNKNOWN_URL')}")
+            return AnalysisResult(
+                verdict="REJECT",
+                reasoning="Не відповідає обов'язковим критеріям, або закрита інформація резюме.",
+                evidence=[],
+                missing_criteria=["Повний текст резюме недоступний"],
+                interview_questions=[]
+            )
+        
+        # ПРОВЕРКА 2: Полностью пустое резюме (только title, без данных)
+        payload = resume_json.get("payload", resume_json)
+        has_title = bool(payload.get("title") or payload.get("position") or payload.get("candidate_title"))
+        has_skills = bool(payload.get("skills"))
+        has_experience = bool(payload.get("experience"))
+        has_education = bool(payload.get("education"))
+        has_about_raw = bool(payload.get("about_raw"))
+        
+        if has_title and not (has_skills or has_experience or has_education or has_about_raw):
+            logger.warning(f"Empty resume (only title): {resume_json.get('url', 'UNKNOWN_URL')}")
+            return None  # Пропускаем резюме полностью
+        
+        # Диагностика: логируем resume_content для отладки
         messages = self.prepare_prompt(resume_json=resume_json, criteria_bundle=criteria_bundle)
+        resume_text = self._optimize_resume_data(resume_json)
+        logger.info(f"Resume content length: {len(resume_text)} characters")
+        
+        if not resume_text or resume_text == "NO_RESUME_TEXT_AVAILABLE":
+            logger.warning(f"Empty resume_content after optimization: {resume_json.get('url', 'UNKNOWN_URL')}")
+            return None  # Пропускаем резюме
+        
         raw = self.call_llm(messages)
         return self.parse_response(raw)
 
@@ -82,10 +101,16 @@ class ResumeAnalyzer:
             "  - years of experience\n"
             "  - industries or domains\n\n"
 
-            "STEP 2 — Compare extracted signals ONLY with criteria_bundle.\n"
-            "  - Match required criteria.\n"
-            "  - Identify missing criteria.\n"
-            "  - Do not invent data.\n\n"
+            "STEP 2 Compare extracted signals ONLY with criteria_bundle.\n"
+            "APPLY STRICT VERDICT LOGIC:\n"
+            "- If ALL 'must' criteria AND ALL 'semantic' criteria are explicitly found -> verdict is 'MATCH'. In 'reasoning' state that all criteria are met.\n"
+            "- If ALL 'must' criteria are found, but SOME 'semantic' are missing OR require clarification -> verdict is 'CONDITIONAL'. In 'missing_criteria' list exactly what is missing.\n"
+            "- If ANY 'must' criteria is missing -> verdict is 'REJECT'. In 'reasoning' state strictly why it does not fit.\n"
+            "INTERVIEW QUESTIONS LOGIC:\n"
+            "- For MATCH: generate clarifying questions about past experience and how results were achieved.\n"
+            "- For CONDITIONAL: generate questions to clarify missing criteria and verify ambiguous skills.\n"
+            "- For REJECT: interview_questions MUST be an empty array [].\n"
+            "- Do not invent data.\n\n"
 
             "STEP 3 — Produce ONE JSON object matching AnalysisResult schema.\n\n"
 
@@ -116,7 +141,10 @@ class ResumeAnalyzer:
 
     def call_llm(self, messages: Sequence[Dict[str, str]]) -> str:
         try:
-            return self._llm_chat(messages)
+            raw_response = self._llm_chat(messages)
+            # Диагностика: логируем первые 500 символов ответа LLM
+            logger.debug(f"LLM raw response (first 500 chars): {raw_response[:500]}")
+            return raw_response
         except Exception as e:
             raise ResumeAnalyzerError(f"LLM call failed: {e}") from e
 
@@ -127,6 +155,8 @@ class ResumeAnalyzer:
     def parse_response(self, raw_text: str) -> AnalysisResult:
         obj = self._extract_first_json_object(raw_text)
         if obj is None:
+            # Диагностика: логируем первые 1000 символов, если JSON не найден
+            logger.error(f"Failed to extract JSON from LLM response. First 1000 chars: {raw_text[:1000]}")
             raise LLMResponseFormatError(
                 "LLM did not return a valid JSON object. Expected a single JSON object for AnalysisResult."
             )
@@ -238,7 +268,8 @@ class ResumeAnalyzer:
         if structured_text:
             final_parts.append("=== STRUCTURED ===\n" + structured_text)
         if full_text:
-            final_parts.append("=== FULL_TEXT ===\n" + full_text)
+            # ВАЖНО: "about_raw" — это ОСНОВНОЙ блок опыта кандидата (uploaded CV)
+            final_parts.append("=== CANDIDATE EXPERIENCE SUMMARY (PRIMARY SOURCE) ===\n" + full_text)
 
         return "\n\n".join(final_parts) if final_parts else "NO_RESUME_TEXT_AVAILABLE"
 

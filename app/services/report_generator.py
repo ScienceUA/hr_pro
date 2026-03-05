@@ -22,9 +22,17 @@ class ReportGenerator:
       - Link: Work.ua URL.
     """
 
-    def generate(self, resume_json: Dict[str, Any], analysis: AnalysisResult) -> str:
+    def generate(self, resume_json: Dict[str, Any], analysis: Optional[AnalysisResult]) -> str:
         title = self._extract_position_title(resume_json) or "Невідома посада"
         url = self._extract_url(resume_json) or ""
+
+        # Handle None analysis
+        if analysis is None:
+            return self._generate_error_block(title, url, "Помилка аналізу LLM")
+        
+        # Handle protected resume (LOGIN required)
+        if "обмежений" in analysis.reasoning.lower() or "авторизація" in analysis.reasoning.lower():
+            return self._generate_protected_block(title, url)
 
         verdict_emoji = self._verdict_to_emoji(analysis.verdict)
 
@@ -165,6 +173,47 @@ class ReportGenerator:
         if not analysis.interview_questions:
             return "- (питання не згенеровані)"
         return "\n".join(f"- {q}" for q in analysis.interview_questions)
+
+    # --------------------
+    # Error handling
+    # --------------------
+
+    def _generate_error_block(self, title: str, url: str, error_msg: str) -> str:
+        """Generate markdown block for failed analysis."""
+        md: list[str] = []
+        md.append(f"## {title}")
+        md.append("")
+        if url:
+            md.append(f"[Посилання на резюме]({url})")
+            md.append("")
+        md.append("**Вердикт:** ⚠️")
+        md.append("")
+        md.append(f"- {error_msg}")
+        md.append("")
+        md.append("")
+        md.append("---")
+        md.append("")
+        return "\n".join(md)
+
+    def _generate_protected_block(self, title: str, url: str) -> str:
+        """Generate markdown block for protected/login-required resumes."""
+        md: list[str] = []
+        md.append(f"## {title}")
+        md.append("")
+        if url:
+            md.append(f"[Посилання на резюме]({url})")
+            md.append("")
+        md.append("**Вердикт:** 🟡")
+        md.append("")
+        md.append("**Чому підходить:**")
+        md.append("Немає даних")
+        md.append("")
+        md.append("**Ризики / Чого бракує:**")
+        md.append("Доступ до резюме обмежений, перейдіть за посиланням для отримання даних резюме.")
+        md.append("")
+        md.append("---")
+        md.append("")
+        return "\n".join(md)
 
     # --------------------
     # Helpers: privacy-safe extraction

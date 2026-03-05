@@ -66,25 +66,47 @@ class SerpParser(BaseParser):
         # Если карточки были найдены, считаем COMPLETE, иначе PARTIAL
         quality = DataQuality.COMPLETE if items else DataQuality.PARTIAL
 
-        # --- total_found: пытаемся вытащить реальное число результатов ---
+        # --- total_found: витягуємо кількість результатів з meta description ---
         total_found = None
         try:
-            # Берём весь текст страницы и ищем наиболее “похоже на count”
-            # Пример: "Знайдено 481 резюме", "481 кандидат", "Резюме (481)" и т.п.
-            text = self.soup.get_text(" ", strip=True)
-
-            # Ищем числа с пробелами/nbsp: "1 234"
-            nums = re.findall(r"\b\d[\d\s\u00A0]{0,10}\b", text)
-            candidates = []
-            for s in nums:
-                n = int(s.replace(" ", "").replace("\u00A0", ""))
-                # фильтр от мусора интерфейса
-                if n >= 20:
-                    candidates.append(n)
-            if candidates:
-                total_found = max(candidates)
+           # Work.ua ЗАВЖДИ вказує кількість у <meta name="Description" content="...">
+           # Формат: "N кандидатів за запитом «...» у Місті..."
+           # Приклад: "48 кандидатів за запитом «team lead developer» у Києві на Work.ua..."
+           meta_desc = self.soup.find("meta", attrs={"name": "Description"})
+           if meta_desc and meta_desc.get("content"):
+               content = meta_desc["content"]
+               # Шукаємо ЧИСЛО перед словом "кандидат"
+               match = re.search(r"^(\d+)\s+кандидат", content)
+               if match:
+                   total_found = int(match.group(1))
         except Exception:
-            total_found = None
+            pass
+       
+        # Fallback: якщо meta не знайдено, шукаємо у тексті сторінки
+        if total_found is None:
+            try:
+                text = self.soup.get_text(" ", strip=True)
+                # Шукаємо число перед "кандидат" в тексті сторінки
+                match = re.search(r"(\d+)\s+кандидат", text)
+                if match:
+                   total_found = int(match.group(1))
+            except Exception:
+                pass
+       
+        # Fallback: якщо meta не знайдено, пробуємо старий метод
+        if total_found is None:
+           try:
+               text = self.soup.get_text(" ", strip=True)
+               nums = re.findall(r"\b\d[\d\s\u00A0]{0,10}\b", text)
+               candidates = []
+               for s in nums:
+                   n = int(s.replace(" ", "").replace("\u00A0", ""))
+                   if n >= 20:
+                       candidates.append(n)
+               if candidates:
+                   total_found = max(candidates)
+           except Exception:
+               total_found = None
 
         return ParsingResult(
             url=self.url,

@@ -9,10 +9,12 @@ import json
 import os
 import sys
 import time
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from app.agent.vacancy_compressor import compress_vacancy_to_query
 
 UA_PREVIEW_PROMPT = (
     "Знайдено {total} резюме за запитом: «{query}».\n"
@@ -20,11 +22,22 @@ UA_PREVIEW_PROMPT = (
     "Якщо хочете звузити пошук — введіть уточнений запит текстом.\n"
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# -----------------------------
+# Настройка логирования (диагностика)
+# -----------------------------
+import logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # -----------------------------
 # Imports from app/ (lazy in main)
@@ -33,8 +46,6 @@ ResumeAnalyzer = None  # type: ignore
 ReportGenerator = None  # type: ignore
 real_llm_chat = None  # type: ignore
 RealLLMNotConfigured = RuntimeError  # type: ignore
-
-
 
 # -----------------------------
 # System prompt (6.3) - strict
@@ -54,25 +65,88 @@ EVIDENCE RULE:
 - Every positive claim must be backed by a verbatim quote copied from resume_content.
 - If you cannot quote it, you cannot claim it.
 
+DATA STRUCTURE:
+- resume_content has 2 sections: STRUCTURED and FULL_TEXT.
+- STRUCTURED: Fields like POSITION, SKILLS, EXPERIENCE (may be empty if candidate uploaded CV file).
+- FULL_TEXT (PRIMARY SOURCE): Complete candidate experience from uploaded CV file ("Версія для швидкого перегляду").
+
+CRITICAL: If STRUCTURED is empty, rely ENTIRELY on FULL_TEXT section.
+If a skill/technology appears in FULL_TEXT, treat it as CONFIRMED experience, NOT as missing.
+
 INTERVIEW QUESTIONS:
-- Generate 3-5 technical or behavioral interview questions that help validate weak points you found
-  or confirm claimed experience. Questions must be specific and actionable.
+Generate specific interview questions based on the candidate's experience and the job requirements.
+For 🟢: Ask clarifying questions about their past experience and how exactly they achieved results.
+For 🟡: Ask specific questions to clarify ambiguous points, missing criteria, and how they applied key skills in practice.
+HARD RULE FOR REJECT:
+If verdict is 🔴, interview_questions MUST be an empty array.
 
 OUTPUT RULE:
-- Return ONLY one JSON object, no markdown, no code fences, no extra keys.
-- JSON must match AnalysisResult schema exactly:
-  {
-    "verdict": "MATCH|CONDITIONAL|REJECT",
-    "reasoning": "string",
-    "evidence": [{"quote":"string","supports":"string","location":"Title|Skills|Experience|Education"}],
-    "missing_criteria": ["string"],
-    "interview_questions": ["string"]
-  }
+Return ONLY one JSON object, no markdown, no code fences, no extra keys. JSON must match AnalysisResult schema exactly:
+{
+  "verdict": "MATCH|CONDITIONAL|REJECT",
+  "reasoning": "string",
+  "evidence": [ {"quote": "string", "supports":"string", "location":"Title|Skills|Experience|Education"} ],
+  "missing_criteria": ["string"],
+  "interview_questions": ["string"]
+}
+
+ROLE DOMINANCE RULE:
+
+- Identify candidate's PRIMARY PROFESSIONAL ROLE based on TITLE and dominant EXPERIENCE.
+- If search query implies a different primary role than candidate’s dominant role,
+  you MUST downgrade verdict to at most CONDITIONAL.
+- Keyword overlap alone is NOT sufficient for MATCH.
+
+DOMAIN CONTINUITY RULE:
+- Evaluate whether relevant experience is:
+  A) Core domain experience (majority of career)
+  B) Adjacent/support experience (isolated projects)
+Support/adjacent experience must NOT be treated as full alignment.
+
+ADJACENT EVIDENCE CAP:
+- If relevant evidence appears only as isolated projects/support work and the dominant career domain is different,
+  verdict MUST be at most CONDITIONAL (never MATCH), even if keywords overlap.
+
+OWNERSHIP RULE:
+- Distinguish between:
+  - Ownership (responsible for strategy/budget/leadership)
+  - Support role (analysis, reporting, assistance)
+Support experience alone cannot justify MATCH.
+
+MANDATORY RISK RULE (STRICT):
+- If verdict is CONDITIONAL, missing_criteria MUST contain at least 1 specific, non-generic gap.
+- Forbidden items in missing_criteria: placeholders, "(нічого критичного...)", "(mock...)", empty strings.
+- If primary role differs from target role, missing_criteria MUST include an explicit "рольова невідповідність: <X> ≠ <Y>" item.
 
 VERDICT POLICY:
-- MATCH: must-have criteria are explicitly evidenced; no must-not violations.
-- CONDITIONAL: some must-have criteria are missing but profile could fit.
-- REJECT: must-not violation OR critical must-have missing.
+MATCH: Candidate explicitly matches ALL mandatory requirements (must) and ALL contextually expected criteria.
+CONDITIONAL: Candidate matches ALL mandatory requirements, but misses some non-mandatory/desired criteria OR requires clarification on specific practical applications.
+REJECT: Candidate does NOT match mandatory requirements, or the resume data is closed/hidden. Explain strictly why they do NOT fit.
+Be concise and factual.
+Additionally:
+    MATCH STRICT CONDITION:
+    - MATCH requires:
+    1) Primary role alignment with target domain,
+    2) Evidence of ownership OR measurable performance responsibility (budget, KPI, ROI/ROMI, leadership).
+    - If ownership or measurable responsibility is missing, verdict cannot be MATCH.
+
+CRITERIA INTERPRETATION:
+- "must" array: Skills that MUST be present (reject if missing).
+- "semantic" array: Desirable skills (conditional if missing, not reject).
+- "role_anchors": Keywords from search query (for context only, NOT strict requirements).
+- "source_query": Original user query (for context only).
+
+IMPORTANT: If "must" is empty, treat ALL criteria as CONDITIONAL, not mandatory.
+Do NOT automatically convert "role_anchors" or "source_query" into strict requirements.
+
+DATA STRUCTURE:
+- resume_content has 2 sections: STRUCTURED and CANDIDATE EXPERIENCE SUMMARY.
+- STRUCTURED: Fields like POSITION, SKILLS, EXPERIENCE (may be empty if candidate uploaded CV file).
+- CANDIDATE EXPERIENCE SUMMARY (PRIMARY SOURCE): Complete experience from uploaded CV ("Версія для швидкого перегляду").
+
+CRITICAL: If STRUCTURED is empty, rely ENTIRELY on CANDIDATE EXPERIENCE SUMMARY.
+If a skill/technology appears in ANY section, treat it as CONFIRMED, NOT missing.
+
 Be concise and factual.
 """.strip()
 
@@ -106,10 +180,54 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
             items.append(json.loads(line))
     return items
 
-
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+def generate_markdown_from_json(json_filepath: str, role_title: str = "Кандидат") -> str:
+    with open(json_filepath, 'r', encoding='utf-8') as f:
+        analyses = json.load(f)
+
+    md_lines = []
+    status_map = {"MATCH": "🟢", "CONDITIONAL": "🟡", "REJECT": "🔴"}
+
+    for analysis in analyses:
+        resume_url = analysis.get("url", "https://www.work.ua/resumes/") 
+        md_lines.append(f"## {role_title}")
+        md_lines.append(f"[Посилання на резюме]({resume_url})\n")
+
+        raw_verdict = analysis.get("verdict", "REJECT")
+        emoji_verdict = status_map.get(raw_verdict, "🔴")
+        md_lines.append(f"**Вердикт:** {emoji_verdict}")
+
+        if raw_verdict == "MATCH":
+            md_lines.append("\n**Чому підходить:**")
+            md_lines.append(f"{analysis.get('reasoning', '')}")
+        elif raw_verdict == "CONDITIONAL":
+            md_lines.append("\n**Ризики / Чого бракує:**")
+            missing = analysis.get("missing_criteria", [])
+            if missing:
+                for item in missing:
+                    md_lines.append(f"- {item}")
+            else:
+                md_lines.append(f"- {analysis.get('reasoning', '')}")
+        elif raw_verdict == "REJECT":
+            md_lines.append("\n**Чому не підходить:**")
+            md_lines.append(f"{analysis.get('reasoning', '')}")
+
+        questions = analysis.get("interview_questions", [])
+        if raw_verdict != "REJECT" and questions:
+            md_lines.append("\n**Питання для співбесіди:**")
+            for q in questions:
+                md_lines.append(f"- {q}")
+        md_lines.append("\n---\n")
+
+    final_markdown = "\n".join(md_lines)
+    md_filepath = json_filepath.replace(".json", ".md")
+    
+    with open(md_filepath, 'w', encoding='utf-8') as f:
+        f.write(final_markdown)
+    return md_filepath
 
 
 # -----------------------------
@@ -397,15 +515,21 @@ def main() -> int:
         llm_chat = real_llm_chat  # type: ignore
 
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
     out_dir = PROJECT_ROOT / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # ---------------- Step 1: Interpretation (6.1) ----------------
-    print("🧩 Step 1/4: Интерпретация запроса...")
+    print("🧩 Step 1/4: Інтерпретація запиту...")
+    
     interpreter = load_interpreter()
     t0 = time.time()
     interpretation = interpreter(user_query)
+    
+    # DEBUG: показати criteria_bundle
+    print(f"\n🔍 DEBUG criteria_bundle:")
+    print(json.dumps(interpretation.criteria_bundle, ensure_ascii=False, indent=2))
+    print(f"🔍 DEBUG search_payload.params: {interpretation.search_payload.get('params', {})}\n")
 
     # Ensure crawl output path has timestamp to avoid overwriting
     search_payload = dict(interpretation.search_payload)
@@ -480,6 +604,11 @@ def main() -> int:
             print("🧩 Step 1/4: Інтерпретація уточненого запиту...")
             t0 = time.time()
             interpretation = interpreter(user_query)
+           
+            # DEBUG: показати criteria_bundle
+            print(f"\n🔍 DEBUG criteria_bundle:")
+            print(json.dumps(interpretation.criteria_bundle, ensure_ascii=False, indent=2))
+            print(f"🔍 DEBUG search_payload.params: {interpretation.search_payload.get('params', {})}\n")
 
             search_payload = dict(interpretation.search_payload)
             search_payload.setdefault("out", str(out_dir / f"result_{ts}.jsonl"))
@@ -517,18 +646,27 @@ def main() -> int:
         print(f"🧠 Анализ {i}/{len(resumes)}...")
         try:
             analysis = analyzer.analyze(resume_json=resume_json, criteria_bundle=interpretation.criteria_bundle)
+            
+            # Пропускаем None (пустые резюме без данных)
+            if analysis is None:
+                logger.info(f"Skipped empty resume {i}/{len(resumes)}: {resume_json.get('url', 'UNKNOWN')}")
+                continue
+            
             analyses.append(analysis)
-        except RealLLMNotConfigured as e:  # type: ignore
+        except RealLLMNotConfigured as e:
             raise SystemExit(str(e))
         except Exception as e:
-            # Fail-soft: keep pipeline running, but mark as REJECT-like minimal
-            # (we do NOT invent evidence)
+            # Fail-soft: keep pipeline running, but mark as CONDITIONAL with Ukrainian error message
+            # Диагностика: логируем полную ошибку
+            import logging
+            logging.exception(f"Analysis failed for resume {i}/{len(resumes)}")
+            
             analyses.append(
                 {
                     "verdict": "CONDITIONAL",
-                    "reasoning": f"Analyzer error: {e}",
+                    "reasoning": f"Помилка аналізу: {str(e)[:200]}",  # Ukrainian + truncated error
                     "evidence": [],
-                    "missing_criteria": ["(analysis failed)"],
+                    "missing_criteria": ["(аналіз не виконано через технічну помилку)"],
                     "interview_questions": [
                         "Уточните ключевые навыки и опыт по требованиям вакансии (анализ не выполнен)."
                     ],
@@ -553,24 +691,29 @@ def main() -> int:
         else:
             validated_analyses.append(a)
 
-    md_text = build_markdown_report(reporter, resumes, validated_analyses)
+    # Отримуємо назву ролі з параметрів пошуку, замінюємо пробіли на дефіси
+    role_slug = search_payload.get("query", "vacancy").replace(" ", "-").lower()
+    json_report_path = out_dir / f"result_llm_{role_slug}_{ts}.json"
 
-    md_path = out_dir / f"report_{ts}.md"
-    write_text(md_path, md_text)
+    # Зберігаємо результати аналізу у JSON-файл, поєднуючи їх з URL із сирих даних
+    dump_data = []
+    for analysis, resume_data in zip(validated_analyses, resumes):
+        data = analysis.model_dump() if hasattr(analysis, 'model_dump') else analysis.copy()
+        # Додаємо точний URL в результати
+        data["url"] = resume_data.get("url", "https://www.work.ua/resumes/")
+        dump_data.append(data)
 
-    # Optional PDF (best effort)
-    pdf_path = out_dir / f"report_{ts}.pdf"
-    pdf_ok = try_write_pdf(md_text, pdf_path)
+    with open(json_report_path, "w", encoding="utf-8") as f:
+        json.dump(dump_data, f, ensure_ascii=False, indent=2)
+    print(f" Отчёт сохранён в JSON: {json_report_path}")
 
-    print(f"✅ Отчёт сохранён: {md_path}")
-    if pdf_ok:
-        print(f"✅ PDF сохранён:  {pdf_path}")
-    else:
-        print("ℹ️ PDF не создан (reportlab недоступен или ошибка рендера). Markdown готов.")
+    # Генеруємо візуальний Markdown зі збереженого JSON
+    role_title = search_payload.get("query", "Кандидат")
+    md_filepath = generate_markdown_from_json(str(json_report_path), role_title=role_title)
+    print(f" Markdown-звіт готовий: {md_filepath}")
 
-    print("🎉 Готово.")
+    print(" Готово.")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
