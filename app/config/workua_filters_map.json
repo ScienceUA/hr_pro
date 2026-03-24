@@ -148,5 +148,10 @@
     { "param": "photo", "value": 1, "name_ua": "Зі світлиною", "example_url": "https://www.work.ua/resumes/?photo=1" },
     { "param": "disability", "value": 1, "name_ua": "З інвалідністю", "example_url": "https://www.work.ua/resumes/?disability=1" },
     { "param": "veteran", "value": 1, "name_ua": "Ветерани російсько-української війни", "example_url": "https://www.work.ua/resumes/?veteran=1" }
+  ],
+  "sort": [
+    { "id": 1, "name_ua": "За релевантністю", "param": "sort" },
+    { "id": 2, "name_ua": "За датою", "param": "sort" },
+    { "id": 3, "name_ua": "За зарплатою", "param": "sort" }
   ]
 }

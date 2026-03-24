@@ -56,11 +56,25 @@ class SerpParser(BaseParser):
                 logger.warning(f"Failed to parse SERP item: {e}")
                 continue
 
-        # 3. Пагинация (строгая логика: только rel='next')
+        # 3. Пагинация (гнучкий пошук наступної сторінки)
         next_page = None
-        a = self.soup.select_one(CSS.SERP_NEXT_PAGE)
-        if a and a.get("href"):
-            next_page = urljoin(self.url, a["href"])
+        
+        # Спроба 1: Шукаємо стандартний rel='next' або стрілочку
+        a = self.soup.select_one("ul.pagination a[rel='next'], ul.pagination li a i.glyphicon-chevron-right")
+        if a:
+            # Якщо знайшли іконку, беремо її батьківський тег <a>
+            if a.name == 'i':
+                a = a.parent
+            if a.get("href"):
+                next_page = urljoin(self.url, a["href"])
+        
+        # Спроба 2: Шукаємо просто наступний елемент після активного
+        if not next_page:
+            active_li = self.soup.select_one("ul.pagination li.active")
+            if active_li:
+                next_li = active_li.find_next_sibling("li")
+                if next_li and next_li.find("a"):
+                    next_page = urljoin(self.url, next_li.find("a")["href"])
 
         # 4. Формирование результата
         # Если карточки были найдены, считаем COMPLETE, иначе PARTIAL

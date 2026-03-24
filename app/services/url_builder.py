@@ -133,26 +133,12 @@ class UrlBuilder:
 
     @classmethod
     def _slugify(cls, text: str) -> str:
-        """
-        Транслитерирует кириллицу, переводит в lower, оставляет безопасные символы.
-        """
+        import urllib.parse
         text = text.lower().strip()
-        
-        # Транслитерация
-        res = []
-        for char in text:
-            res.append(cls.TRANS_MAP.get(char, char))
-        text = "".join(res)
-        
-        # Очистка (оставляем a-z, 0-9, ., +, -)
-        # Заменяем пробелы на +
-        text = re.sub(r"\s+", "+", text)
-        # Удаляем всё кроме разрешенных
-        text = re.sub(r"[^a-z0-9\.\+\-]", "", text)
-        # Убираем дубли плюсов
-        text = re.sub(r"\++", "+", text)
-        
-        return text.strip("+")
+        # Замінюємо пробіли на плюси для Work.ua
+        text = text.replace(" ", "+")
+        # Кодуємо кирилицю у правильний URL-формат (наприклад %D0%BC...)
+        return urllib.parse.quote(text, safe="+")
 
     @classmethod
     def _get_city_slug(cls, city: str) -> str:

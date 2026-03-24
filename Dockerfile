@@ -42,8 +42,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 # Runtime system libs:
-# - lxml runtime: libxml2, libxslt
-# - reportlab (optional PDF): freetype, jpeg (safe to include)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libxml2 \
     libxslt1.1 \
@@ -63,27 +61,42 @@ COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir /wheels/* \
  && rm -rf /wheels
 
+# === ДОДАНО: Встановлення залежностей для багатомовної моделі ===
+# Критично: встановлюємо легку CPU-версію PyTorch, щоб образ не важив 4 ГБ
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir sentence-transformers
+# ==================================================================
+
 # Copy only what is needed to run the agent (keep surface small)
 COPY --chown=hruser:hruser app/ ./app/
 COPY --chown=hruser:hruser run_agent.py ./
 COPY --chown=hruser:hruser pyproject.toml ./
 COPY --chown=hruser:hruser README.md ./
 
-# Writable dirs (only these should be RW)
-RUN mkdir -p /app/out /app/logs \
- && chown -R hruser:hruser /app/out /app/logs
+# === НАСТРОЙКА КЭША И ПРАВ ДО ПЕРЕХОДА НА ПОЛЬЗОВАТЕЛЯ HRUSER ===
+ENV XDG_CACHE_HOME=/app/.cache \
+    HF_HOME=/app/.cache/huggingface \
+    SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence_transformers
+
+# Writable dirs (only these should be RW), включая папку для кэша
+RUN mkdir -p /app/out /app/logs /app/.cache \
+ && chown -R hruser:hruser /app/out /app/logs /app/.cache
 
 # Safety: make code read-only inside image (defense-in-depth)
 RUN chmod -R 555 /app/app \
  && chmod 555 /app/run_agent.py
 
 # Ensure default output file is writable even with read_only rootfs:
-# run_agent.py / agent may write "result.jsonl" in /app by default.
-# Redirect it to /app/out/result.jsonl via symlink.
 RUN ln -sf /app/out/result.jsonl /app/result.jsonl \
  && chown -h hruser:hruser /app/result.jsonl
 
+# === ПЕРЕХОД НА ПОЛЬЗОВАТЕЛЯ ===
 USER hruser
+
+# === ЗАГРУЗКА МНОГОЯЗЫЧНОЙ МОДЕЛИ ===
+RUN python -c "from chromadb.utils import embedding_functions; \
+func = embedding_functions.SentenceTransformerEmbeddingFunction(model_name='paraphrase-multilingual-MiniLM-L12-v2'); \
+func(['Тест українською', 'Тест на русском'])"
 
 VOLUME ["/app/out"]
 

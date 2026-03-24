@@ -41,7 +41,7 @@ class ResumeParser(BaseParser):
                 resume_id=resume_id,
                 url=canonical_url,
                 name=self._get_text_safe(self.soup, CSS.RESUME_H1),
-                title=self._get_text_safe(self.soup, CSS.RESUME_POSITION),
+                title=self._extract_title(),
                 salary=self._extract_salary(),
                 has_hidden_contacts=bool(self.soup.select_one(CSS.RESUME_HIDDEN_ALERT)),
                 skills=[],
@@ -119,6 +119,30 @@ class ResumeParser(BaseParser):
                 quality=DataQuality.ERROR,
                 error_message=msg
             )
+    
+    def _extract_title(self) -> Optional[str]:
+        """
+        Витягує посаду через meta og:title
+        (наприклад: <meta property="og:title" content="Резюме «Менеджер ЗЕД, логіст»">)
+        """
+        # 1. Ваш метод: шукаємо в мета-тегах
+        meta_tag = self.soup.select_one('meta[property="og:title"]')
+        if meta_tag and meta_tag.has_attr("content"):
+            content = meta_tag["content"]
+            # Витягуємо все, що знаходиться між українськими лапками « »
+            match = re.search(r"«(.*?)»", content)
+            if match:
+                return match.group(1).strip()
+
+        # 2. Резервний метод (якщо раптом мета-тегу не буде)
+        h2_el = self.soup.select_one(CSS.RESUME_POSITION)
+        if h2_el:
+            # Видаляємо span із зарплатою, щоб вона не прилипла до назви посади
+            for span in h2_el.select('span'):
+                span.decompose()
+            return self._clean_text(h2_el.get_text())
+            
+        return None
 
     def _extract_resume_id(self) -> str:
         """

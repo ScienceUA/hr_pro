@@ -44,7 +44,7 @@ class CSS:
     SERP_TITLE = "h2 a"
     SERP_SALARY = "p.nowrap"
     SERP_SNIPPET = "div.mt-sm, p.text-default-7"
-    SERP_NEXT_PAGE = "ul.pagination a[rel='next']"
+    SERP_NEXT_PAGE = "ul.pagination li a i.glyphicon-chevron-right, ul.pagination a[rel='next']"
     SERP_TOTAL_FOUND = "h1, h2, .text-default-7, .text-muted"
 
 
@@ -52,7 +52,7 @@ class CSS:
     
     # Основные данные
     RESUME_H1 = "h1"                   # Имя
-    RESUME_POSITION = "h2.title-print" # Должность
+    RESUME_POSITION = "h1 ~ h2, h2.title-print" # Шукає перший h2 одразу після h1 (Ім'я)
     
     # Монолитный текст резюме (часто для резюме из прикреплённого файла)
     RESUME_ADD_INFO = "div#add_info.wordwrap, div.wordwrap#add_info"

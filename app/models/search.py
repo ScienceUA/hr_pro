@@ -31,6 +31,11 @@ class SearchQuery(BaseModel):
     
     page: int = Field(1, ge=1)
 
+    allowed_sources: List[str] = Field(
+        default_factory=lambda: ["workua", "rabotaua", "linkedin"],
+        description="Список активных источников для поиска"
+    )
+
 class SearchResponse(BaseModel):
     """Результат поиска (Выходные данные)"""
     total_found: int

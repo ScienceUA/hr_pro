@@ -7,7 +7,7 @@ services:
 
     # Only /app/out is writable (mounted)
     volumes:
-      - ./out:/app/out:rw
+    - ./out:/app/out:rw
 
     # Security hardening
     read_only: true

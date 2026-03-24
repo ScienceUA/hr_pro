@@ -1,5 +1,6 @@
 import time
 import logging
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
@@ -137,87 +138,93 @@ class CrawlerService:
     def preview(self, search_payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Phase 1 (Preview/Count):
-        - НЕ скачивает детали резюме
-        - НЕ сохраняет JSONL
-        - Только: проходит SERP пагинацию, собирает URL резюме сверху вниз
-        и возвращает {total_found, urls}.
+        Проходить по сторінках використовуючи явний параметр ?page=N.
         """
         query = str(search_payload.get("query") or "").strip()
         city = str(search_payload.get("city") or "").strip()
         params = search_payload.get("params") or {}
-        max_pages = search_payload.get("max_pages", None)
+        max_pages = search_payload.get("max_pages", 10) # Задаємо безпечний ліміт за замовчуванням
+        direct_url = search_payload.get("direct_url")
 
         if not query:
             return {"total_found": 0, "urls": []}
 
-        try:
-            start_url = UrlBuilder.build(query, city, params)
-        except Exception as e:
-            logger.error(f"Failed to build URL (preview): {e}")
-            return {"total_found": 0, "urls": []}
-
-        current_url = start_url
-        pages_processed = 0
-
         urls: list[str] = []
         seen: set[str] = set()
+        real_total = None
 
-        while current_url and (max_pages is None or pages_processed < int(max_pages)):
-            logger.info(f"📎 Preview SERP page {pages_processed + 1}: {current_url}")
+        # Явно перебираємо сторінки від 1 до max_pages
+        for page_num in range(1, int(max_pages) + 1):
+            # Додаємо параметр сторінки до параметрів пошуку
+            current_params = dict(params)
+            if page_num > 1:
+                current_params["page"] = page_num
 
-            # --- Fetch ---
+            try:
+                # Якщо є пряме посилання, використовуємо його, інакше будуємо через UrlBuilder
+                if direct_url:
+                    current_url = self._append_page_to_url(direct_url, page_num)
+                else:
+                    current_url = UrlBuilder.build(query, city, current_params)
+            except Exception as e:
+                logger.error(f"Failed to build URL (preview) for page {page_num}: {e}")
+                break
+
+            logger.info(f"📎 Preview SERP page {page_num}: {current_url}")
+
             try:
                 html_content = self.fetcher.get(current_url)
                 if not html_content:
-                    logger.error("Empty response from fetcher for SERP (preview).")
+                    logger.error(f"Empty response for SERP page {page_num}.")
                     break
             except Exception as e:
-                logger.error(f"Network error fetching SERP (preview): {e}")
+                logger.error(f"Network error fetching SERP page {page_num}: {e}")
                 break
 
-            # --- Safety ---
             base_parser = BaseParser(html_content, current_url)
             if not self._check_page_safety(base_parser.page_type, context="SERP_PREVIEW"):
                 break
             if base_parser.page_type != PageType.SERP:
-                logger.warning(f"Unexpected page type for SERP preview: {base_parser.page_type}. Stopping.")
+                logger.warning(f"Unexpected page type. Stopping preview at page {page_num}.")
                 break
 
-            # --- Parse SERP ---
             serp_parser = SerpParser(html_content, current_url)
             serp_result = serp_parser.parse()
-            if serp_result.quality == DataQuality.ERROR:
-                logger.error("Failed to parse SERP structure (preview).")
-                break
+            
+            # Витягуємо total_found тільки з першої сторінки
+            if page_num == 1:
+                try:
+                    real_total = getattr(serp_result, "total_found", None)
+                except:
+                    pass
 
             previews = serp_result.payload or []
+            
+            # Якщо карток на сторінці немає (наприклад, дійшли до кінця), зупиняємось
+            if not previews:
+                logger.info(f"No candidates found on page {page_num}. Stopping preview.")
+                break
+
+            new_urls_found = False
             for p in previews:
                 u = getattr(p, "url", None)
                 if isinstance(u, str) and u and u not in seen:
                     seen.add(u)
                     urls.append(u)
+                    new_urls_found = True
 
-            next_url = serp_result.next_page_url
-            if next_url == current_url:
-                logger.warning("Next page URL matches current (preview). Loop detected.")
-                break
+            # Якщо на новій сторінці всі URL вже були відомі, значить Work.ua просто повторює видачу (кінець)
+            if not new_urls_found:
+                 logger.info(f"No NEW candidates found on page {page_num}. Stopping preview.")
+                 break
 
-            current_url = next_url
-            pages_processed += 1
+            # Пауза перед наступною сторінкою
+            if page_num < int(max_pages):
+                 time.sleep(self.DELAY_SERP)
 
-            if current_url:
-                time.sleep(self.DELAY_SERP)
-
-        # Если SerpParser смог вытащить реальное total_found — используем его.
-        # Иначе fallback: len(urls)
-        real_total = None
-        try:
-            real_total = getattr(serp_result, "total_found", None)
-        except Exception:
-            real_total = None
-
-        return {"total_found": int(real_total) if isinstance(real_total, int) and real_total > 0 else len(urls), "urls": urls}
-
+        total_to_return = int(real_total) if isinstance(real_total, int) and real_total > 0 else len(urls)
+        return {"total_found": total_to_return, "urls": urls}
+        
     def run_from_urls(self, urls: list[str], out: str) -> str:
         """
         Phase 2 (Full crawl by URLs):
@@ -356,3 +363,13 @@ class CrawlerService:
             self.stats.stop_reason = f"Blocked: {page_type.value}"
             return False
         return True
+    
+    def _append_page_to_url(self, base_url: str, page_num: int) -> str:
+        """Динамічно додає або оновлює параметр ?page=N для будь-якого URL"""
+        if page_num <= 1:
+            return base_url
+        parsed = urlparse(base_url)
+        qs = parse_qs(parsed.query)
+        qs['page'] = [str(page_num)]
+        new_query = urlencode(qs, doseq=True)
+        return urlunparse(parsed._replace(query=new_query))
