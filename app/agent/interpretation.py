@@ -3,17 +3,39 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
+from pydantic import BaseModel, Field
 from app.services.llm_client import real_llm_chat # Підключаємо LLM для аналізу критеріїв
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKUA_MAP_PATH = PROJECT_ROOT / "app" / "config" / "workua_filters_map.json"
 
 SOURCE_MAP = {
-    "work": "workua",
-    "rabota": "rabotaua",
-    "linkedin": "linkedin"
+   "work": "workua",
+   "rabota": "rabotaua",
+   "linkedin": "linkedin"
 }
+
+class SearchPayload(BaseModel):
+    """Суворий контракт даних для всіх джерел (Work, Rabota, LinkedIn)"""
+    query: str
+    city: str = "ukraine"
+    allowed_sources: List[str] = ["workua", "rabotaua", "linkedin"] # Додано linkedin
+    age_from: Optional[int] = None
+    age_to: Optional[int] = None
+    gender: Optional[str] = None         # "male", "female"
+    salary_min: Optional[int] = None
+    salary_max: Optional[int] = None
+    days: Optional[int] = None           # Кількість днів пошуку
+    category: Optional[str] = None       # "it", "hr" тощо
+    experience_label: Optional[str] = None # "no_experience", "1-2_years" тощо
+    languages: List[str] = Field(default_factory=list) # Список мов
+    employment: Optional[str] = None     # full_time, part_time тощо
+    education: Optional[str] = None      # higher, secondary тощо
+    with_photo: bool = False
+    with_file: bool = False
+    only_disabled: bool = False
+    only_students: bool = False
 NEGATION_WORDS = ["кроме", "без", "не"]
 
 def interpret_query(user_text: str) -> dict:
@@ -78,16 +100,18 @@ def interpret_query(user_text: str) -> dict:
 
     # 5) Build CriteriaBundle: інтелектуальний поділ на обов'язкові (must) та бажані (semantic) критерії
     extraction_prompt = (
-        "Проаналізуй повний текст вакансії.\n"
-        "Поверни ТІЛЬКИ валідний JSON у форматі:\n"
-        "{\n"
-        '  "role": "коротка назва посади для пошуку (наприклад: Менеджер ЗЕД)",\n'
-        '  "experience_id": 165,\n'
-        '  "must": ["обов\'язкові вимоги"],\n'
-        '  "semantic": ["бажані вимоги"]\n'
-        "}\n"
-        "ПРАВИЛА ДЛЯ experience_id: 0 (без досвіду), 1 (до 1 року), 164 (від 1 до 2 років), 165 (від 2 до 5 років), 166 (понад 5 років). Якщо не вказано, пиши null.\n"
-        "Ніякого markdown чи іншого тексту."
+        "Проаналізуй запит на пошук кандидатів та поверни JSON за такими правилами:\n"
+        "1. 'role': ТІЛЬКИ ключові слова посади (наприклад: 'python').\n"
+        "2. 'category': технічна мітка рубрики ('it', 'hr', 'sales', 'marketing').\n"
+        "3. 'age_from' / 'age_to': числа (вік).\n"
+        "3. 'gender': 'male' або 'female'.\n"
+        "4. 'salary_min' / 'salary_max': сума в гривнях.\n"
+        "5. 'experience_label': 'no_experience', 'under_1_year', '1-2_years', '2-5_years', '5-10_years', 'more_10_years'.\n"
+        "6. 'days': кількість днів (тиждень=7, місяць=30).\n"
+        "7. 'with_photo', 'with_file', 'only_disabled', 'only_students': true/false на основі вимог.\n"
+        "8. 'must': список обов'язкових навичок.\n"
+        "9. 'semantic': список бажаних характеристик.\n"
+        "Поверни ТІЛЬКИ чистий JSON."
     )
     
     try:
@@ -138,22 +162,42 @@ def interpret_query(user_text: str) -> dict:
                 mentioned_sources.append(source_id)
 
     # Якщо користувач прямо вказав конкретні сайти (і не відмінив їх), залишаємо тільки їх
+    clean_query = search_query
     if mentioned_sources:
         active_sources = [s for s in mentioned_sources if s in active_sources]
+        # Очищаємо запит від назв джерел (напр. "на robota.ua"), щоб вони не псували пошук
+        for kw in SOURCE_MAP.keys():
+            clean_query = re.sub(rf"(\s*на\s+)?{kw}(\.ua)?", "", clean_query, flags=re.IGNORECASE).strip()
 
-    # 6) Build Search payload
-    search_payload: Dict[str, Any] = {
-        "query": search_query,
-        "city": city_slug,
-        "pages": 5,
-        "out": "result.jsonl",
-        "params": {},
-        "allowed_sources": active_sources,
-    }
+    # 6) Build Search payload (Валідація через Pydantic)
+    payload_obj = SearchPayload(
+        query=parsed_criteria.get("role", clean_query), # Використовуємо очищений clean_query
+        city=city_slug or "ukraine",
+        allowed_sources=active_sources,
+        age_from=parsed_criteria.get("age_from"),
+        age_to=parsed_criteria.get("age_to"),
+        gender=parsed_criteria.get("gender"),
+        salary_min=parsed_criteria.get("salary_min"),
+        salary_max=parsed_criteria.get("salary_max"),
+        days=parsed_criteria.get("days"),
+        category=parsed_criteria.get("category"), # Додано передачу категорії
+        experience_label=parsed_criteria.get("experience_label"),
+        with_photo=parsed_criteria.get("with_photo", False),
+        with_file=parsed_criteria.get("with_file", False),
+        only_disabled=parsed_criteria.get("only_disabled", False),
+        only_students=parsed_criteria.get("only_students", False)
+    )
+    
+    # Конвертуємо в словник для адаптерів
+    search_payload = payload_obj.model_dump()
+    search_payload["pages"] = 5
+    search_payload["out"] = "result.jsonl"
+    search_payload["params"] = {}
 
-    exp_id = parsed_criteria.get("experience_id")
-    if exp_id is not None:
-        search_payload["params"]["experience"] = [int(exp_id)]
+    # Маппінг для Work.ua (старі ID)
+    exp_map_work = {"no_experience": 0, "under_1_year": 1, "1-2_years": 164, "2-5_years": 165, "more_10_years": 166}
+    if payload_obj.experience_label in exp_map_work:
+        search_payload["params"]["experience"] = [exp_map_work[payload_obj.experience_label]]
 
     # Додаємо пряме посилання до payload, якщо воно є
     if direct_url:

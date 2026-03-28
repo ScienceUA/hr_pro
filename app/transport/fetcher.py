@@ -37,3 +37,21 @@ class SmartFetcher:
             # Для MVP краулера возвращаем пустую строку, чтобы парсер выдал ERROR/UNKNOWN,
             # а не валил весь процесс.
             return ""
+    def post_json(self, url: str, json: dict) -> dict: # Змінено json_data на json
+        """
+        Відправляє POST-запит із JSON-тілом.
+        Необхідно для отримання списку резюме через API Rabota.ua.
+        """
+        self.session.headers.update(get_headers())
+        time.sleep(random.uniform(0.5, 1.5))
+        
+        try:
+            logger.debug(f"Posting JSON to {url}...")
+            # Тепер назва параметра у визначенні (json) збігається з назвою у виклику
+            response = self.session.post(url, json=json, timeout=30) 
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            logger.error(f"POST JSON request failed: {e}")
+            # Викидаємо помилку, оскільки без результатів пошуку ми не можемо продовжувати
+            raise RuntimeError(f"Не вдалося отримати дані з API: {e}")

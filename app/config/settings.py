@@ -17,8 +17,9 @@ class Settings(BaseSettings):
     # Было: BASE_DIR: Path = Path(__file__).resolve().parent.parent
     # Стало (3 раза parent):
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
-    CONFIG_DIR: Path = BASE_DIR / "config"
+    CONFIG_DIR: Path = BASE_DIR / "app" / "config"
     WORKUA_FILTERS_PATH: Path = CONFIG_DIR / "workua_filters_map.json"
+    RABOTAUA_FILTERS_PATH: Path = CONFIG_DIR / "rabotaua_filters_map.json"
 
     # --- Proxy Configuration ---
     PROXY_LIST_STR: str = ""
@@ -49,10 +50,11 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    def load_filters_map(self) -> Dict[str, Any]:
-        if not self.WORKUA_FILTERS_PATH.exists():
-            raise FileNotFoundError(f"Filters map not found at {self.WORKUA_FILTERS_PATH}")
-        with open(self.WORKUA_FILTERS_PATH, "r", encoding="utf-8") as f:
+    def load_filters_map(self, source: str = "workua") -> Dict[str, Any]:
+        path = self.WORKUA_FILTERS_PATH if source == "workua" else self.RABOTAUA_FILTERS_PATH
+        if not path.exists():
+            raise FileNotFoundError(f"Filters map for {source} not found at {path}")
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
 
     @property

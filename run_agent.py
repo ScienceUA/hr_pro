@@ -421,7 +421,11 @@ def get_active_adapters(out_path: str, allowed_sources: List[str]) -> Dict[str, 
             except Exception as e:
                 adapters[src] = MockSourceAdapter("workua", error_msg=f"Помилка ініціалізації: {e}")
         elif src == "rabotaua":
-            adapters[src] = MockSourceAdapter("rabotaua")
+            try:
+                from app.sources.rabotaua import RabotaUaAdapter
+                adapters[src] = RabotaUaAdapter(fetcher=shared_fetcher, repository=shared_repo)
+            except Exception as e:
+                adapters[src] = MockSourceAdapter("rabotaua", error_msg=f"Помилка ініціалізації: {e}")
         elif src == "linkedin":
             # Імітуємо помилку підключення для перевірки зведеної таблиці
             adapters[src] = MockSourceAdapter("linkedin", error_msg="API Connection Timeout (Mock)")
