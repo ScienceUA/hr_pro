@@ -39,7 +39,7 @@ class RabotaUaAdapter:
             "gender": search_payload.get("gender", ""), 
             "age": {"from": search_payload.get("age_from"), "to": search_payload.get("age_to")},
             "salary": {"from": search_payload.get("salary_min"), "to": search_payload.get("salary_max")},
-            "hasPhoto": bool(search_payload.get("with_photo", False)),
+            "withPhoto": bool(search_payload.get("with_photo", False)),
             "hasFile": bool(search_payload.get("with_file", False)),
             "onlyDisabled": bool(search_payload.get("only_disabled", False)),
             "onlyStudents": bool(search_payload.get("only_students", False))
@@ -74,7 +74,7 @@ class RabotaUaAdapter:
         
         # (Дні, назва для API)
         buckets = [
-            (1, "Today"),
+            (1, "Day"),
             (3, "ThreeDays"),
             (7, "Week"),
             (30, "Month"),
@@ -87,11 +87,20 @@ class RabotaUaAdapter:
         return min(buckets, key=lambda x: abs(x[0] - days))[1]
 
     def _map_experience(self, exp_label: Optional[str]) -> List[str]:
-        """Шукає ID досвіду (0-5) у списку 'experience'."""
-        if not exp_label: return []
-        exp_list = self.config.get("experience", []) # Змінено з candidate_filters
+        if not exp_label:
+            return []
+        exp_list = self.config.get("candidate_filters", {}).get("experience", [])
+        canonical_map = {
+            "no_experience": "0",
+            "under_1_year": "1",
+            "1-2_years": "2",
+            "2-5_years": "3",
+            "5-10_years": "4",
+            "more_10_years": "5",
+        }
+        exp_id = canonical_map.get(exp_label, exp_label)
         for item in exp_list:
-            if item.get("id") == exp_label or exp_label in item.get("name_ua", "").lower():
+            if str(item.get("id")) == str(exp_id):
                 return [str(item.get("id"))]
         return []
 
@@ -106,20 +115,37 @@ class RabotaUaAdapter:
         return []
 
     def _map_employment(self, label: Optional[str]) -> List[str]:
-        """Маппінг типу зайнятості (scheduleIds: 1, 4, 6 тощо)."""
-        if not label: return []
-        emp_list = self.config.get("employment", [])
+        if not label:
+            return []
+        emp_list = self.config.get("candidate_filters", {}).get("employment", [])
+        canonical_map = {
+            "full_time": "повна зайнятість",
+            "part_time": "неповна зайнятість",
+            "remote": "віддалена робота",
+            "project": "проектна робота",
+            "shift": "позмінна робота",
+            "internship": "стажування / практика",
+            "seasonal": "сезонна / тимчасова робота",
+        }
+        label_ua = canonical_map.get(label, label).lower()
         for item in emp_list:
-            if item.get("slug") == label or label in item.get("name_ua", "").lower():
+            if label_ua == item.get("name_ua", "").lower():
                 return [str(item.get("id"))]
         return []
 
     def _map_education(self, label: Optional[str]) -> List[str]:
-        """Маппінг рівня освіти (educationIds: 1, 2, 3 тощо)."""
-        if not label: return []
-        edu_list = self.config.get("education", [])
+        if not label:
+            return []
+        edu_list = self.config.get("candidate_filters", {}).get("education", [])
+        canonical_map = {
+            "higher": "вища",
+            "incomplete_higher": "незакінчена вища",
+            "secondary_special": "середньо-спеціальна",
+            "secondary": "середня",
+        }
+        label_ua = canonical_map.get(label, label).lower()
         for item in edu_list:
-            if label in item.get("name_ua", "").lower():
+            if label_ua == item.get("name_ua", "").lower():
                 return [str(item.get("id"))]
         return []
         

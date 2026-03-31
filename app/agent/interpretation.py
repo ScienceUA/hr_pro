@@ -62,21 +62,22 @@ def interpret_query(user_text: str) -> dict:
     query_text, city_slug = _extract_query_and_city(user_text, workua_map)
 
     # 3) Extract experience from query
-    experience_code = None
+    experience_label_hint = None
     experience_patterns = [
-        (r"понад 5|більше 5|5\+|6\+|7\+", "166"),     # Понад 5 років
-        (r"від 2 до 5|2-5|3-5|4-5", "165"),            # Від 2 до 5 років
-        (r"від 1 до 2|1-2", "164"),                    # Від 1 до 2 років
-        (r"до 1|менше 1|0-1", "1"),                    # До 1 року
-        (r"без досвіду|немає досвіду", "0"),          # Без досвіду
+        (r"понад 10|більше 10|10\+", "more_10_years"),
+        (r"від 5 до 10|5-10", "5-10_years"),
+        (r"від 2 до 5|2-5|від 2 років|2\+\s*рок", "2-5_years"),
+        (r"від 1 до 2|1-2", "1-2_years"),
+        (r"до 1|менше 1|0-1", "under_1_year"),
+        (r"без досвіду|немає досвіду", "no_experience"),
     ]
-    
-    for pattern, code in experience_patterns:
+
+    for pattern, label in experience_patterns:
         if re.search(pattern, user_text, re.IGNORECASE):
-            experience_code = code
+            experience_label_hint = label
             query_text = re.sub(pattern, "", query_text, flags=re.IGNORECASE).strip()
             break
-    
+
     query_text = re.sub(r"\s+", " ", query_text).strip()
 
     # 4) Extract role keywords for Work.ua search
@@ -100,18 +101,25 @@ def interpret_query(user_text: str) -> dict:
 
     # 5) Build CriteriaBundle: інтелектуальний поділ на обов'язкові (must) та бажані (semantic) критерії
     extraction_prompt = (
-        "Проаналізуй запит на пошук кандидатів та поверни JSON за такими правилами:\n"
-        "1. 'role': ТІЛЬКИ ключові слова посади (наприклад: 'python').\n"
-        "2. 'category': технічна мітка рубрики ('it', 'hr', 'sales', 'marketing').\n"
-        "3. 'age_from' / 'age_to': числа (вік).\n"
-        "3. 'gender': 'male' або 'female'.\n"
-        "4. 'salary_min' / 'salary_max': сума в гривнях.\n"
-        "5. 'experience_label': 'no_experience', 'under_1_year', '1-2_years', '2-5_years', '5-10_years', 'more_10_years'.\n"
-        "6. 'days': кількість днів (тиждень=7, місяць=30).\n"
-        "7. 'with_photo', 'with_file', 'only_disabled', 'only_students': true/false на основі вимог.\n"
-        "8. 'must': список обов'язкових навичок.\n"
-        "9. 'semantic': список бажаних характеристик.\n"
-        "Поверни ТІЛЬКИ чистий JSON."
+        "Проаналізуй запит на пошук кандидатів та поверни JSON.\n"
+        "Поля JSON:\n"
+        "1. role: тільки назва ролі/посади для пошуку.\n"
+        "2. age_from / age_to: числа або null.\n"
+        "3. gender: male / female / null.\n"
+        "4. salary_min / salary_max: числа або null.\n"
+        "5. experience_label: one of "
+        "no_experience, under_1_year, 1-2_years, 2-5_years, 5-10_years, more_10_years, null.\n"
+        "6. days: число днів або null.\n"
+        "7. category: коротка категорія, напр. it, hr, sales, null.\n"
+        "8. employment: one of "
+        "full_time, part_time, remote, project, shift, internship, seasonal, null.\n"
+        "9. education: one of "
+        "higher, incomplete_higher, secondary_special, secondary, null.\n"
+        "10. languages: масив рядків.\n"
+        "11. with_photo, with_file, only_disabled, only_students: true/false.\n"
+        "12. must: список обов'язкових критеріїв.\n"
+        "13. semantic: список бажаних критеріїв.\n"
+        "Поверни тільки JSON без markdown."
     )
     
     try:
@@ -129,6 +137,14 @@ def interpret_query(user_text: str) -> dict:
             "must": [],
             "semantic": [user_text]
         }
+    
+    if experience_label_hint and not parsed_criteria.get("experience_label"):
+        parsed_criteria["experience_label"] = experience_label_hint
+
+    parsed_criteria.setdefault("category", None)
+    parsed_criteria.setdefault("employment", None)
+    parsed_criteria.setdefault("education", None)
+    parsed_criteria.setdefault("languages", [])
 
     criteria_bundle: Dict[str, Any] = {
         "must": parsed_criteria.get("must", []),
@@ -171,7 +187,7 @@ def interpret_query(user_text: str) -> dict:
 
     # 6) Build Search payload (Валідація через Pydantic)
     payload_obj = SearchPayload(
-        query=parsed_criteria.get("role", clean_query), # Використовуємо очищений clean_query
+        query=parsed_criteria.get("role", search_query),
         city=city_slug or "ukraine",
         allowed_sources=active_sources,
         age_from=parsed_criteria.get("age_from"),
@@ -180,8 +196,11 @@ def interpret_query(user_text: str) -> dict:
         salary_min=parsed_criteria.get("salary_min"),
         salary_max=parsed_criteria.get("salary_max"),
         days=parsed_criteria.get("days"),
-        category=parsed_criteria.get("category"), # Додано передачу категорії
+        category=parsed_criteria.get("category"),
         experience_label=parsed_criteria.get("experience_label"),
+        languages=parsed_criteria.get("languages", []),
+        employment=parsed_criteria.get("employment"),
+        education=parsed_criteria.get("education"),
         with_photo=parsed_criteria.get("with_photo", False),
         with_file=parsed_criteria.get("with_file", False),
         only_disabled=parsed_criteria.get("only_disabled", False),
@@ -221,19 +240,39 @@ def _try_load_workua_map() -> Optional[Dict[str, Any]]:
 
 
 def _extract_query_and_city(user_text: str, workua_map: Optional[Dict[str, Any]]) -> Tuple[str, Optional[str]]:
-    """
-    Heuristic:
-      - Split into tokens
-      - If last token matches a known city slug (from map) OR common city name patterns -> treat as city
-      - Otherwise: no city
-    """
-    # Normalize whitespace
     clean = re.sub(r"\s+", " ", user_text).strip()
-    tokens = clean.split(" ")
-    if not tokens:
+    if not clean:
         return "", None
 
-    # Candidate city token: last token
+    city_aliases = {
+        "київ": "kyiv",
+        "києві": "kyiv",
+        "киев": "kyiv",
+        "львів": "lviv",
+        "львові": "lviv",
+        "львов": "lviv",
+        "одеса": "odesa",
+        "одесі": "odesa",
+        "одесса": "odesa",
+        "харків": "kharkiv",
+        "харков": "kharkiv",
+        "дніпро": "dnipro",
+        "днепр": "dnipro",
+    }
+
+    text_lower = clean.lower()
+    for alias, slug in city_aliases.items():
+        if re.search(rf"\b{re.escape(alias)}\b", text_lower):
+            query_text = re.sub(
+                rf"\bу\s+{re.escape(alias)}\b|\bв\s+{re.escape(alias)}\b|\b{re.escape(alias)}\b",
+                "",
+                clean,
+                flags=re.IGNORECASE,
+            ).strip()
+            query_text = re.sub(r"\s+", " ", query_text).strip()
+            return query_text, slug
+
+    tokens = clean.split(" ")
     last = tokens[-1].strip().lower()
 
     known_city_slug = _match_city_slug(last, workua_map)
@@ -241,7 +280,6 @@ def _extract_query_and_city(user_text: str, workua_map: Optional[Dict[str, Any]]
         query_text = " ".join(tokens[:-1]).strip()
         return query_text, known_city_slug
 
-    # Also support pattern "City:kyiv" or "city=kyiv"
     m = re.search(r"(?:city\s*[:=]\s*)([a-z0-9_-]+)$", clean, flags=re.IGNORECASE)
     if m:
         cand = m.group(1).strip().lower()
@@ -250,7 +288,6 @@ def _extract_query_and_city(user_text: str, workua_map: Optional[Dict[str, Any]]
             query_text = re.sub(r"(?:city\s*[:=]\s*)([a-z0-9_-]+)$", "", clean, flags=re.IGNORECASE).strip()
             return query_text, known_city_slug
 
-    # No city detected
     return clean, None
 
 
