@@ -8,14 +8,14 @@ from app.models.parsed_resume import (
     core_parsed_resume_from_legacy_result,
     core_parsed_resume_from_parser_service_response,
 )
+from app.services.legacy_parser_compat_service import (
+    check_freshness_with_legacy_validator,
+    get_legacy_adapter,
+)
 from app.services.parser_runtime_service import (
     check_freshness_with_parser_service,
     parse_resume_with_parser_service,
 )
-from parser_service.execution.executor import RequestExecutor
-from parser_service.freshness_validator import FreshnessValidator
-from parser_service.sources.robotaua import RobotaUaAdapter
-from parser_service.sources.workua import WorkUaAdapter
 
 
 async def check_resume_freshness_for_analysis(
@@ -30,7 +30,7 @@ async def check_resume_freshness_for_analysis(
             url=url,
         )
         return bool(freshness.get("is_fresh"))
-    return await FreshnessValidator.is_fresh(url, created_at)
+    return await check_freshness_with_legacy_validator(url, created_at)
 
 from app.config.settings import settings
 from app.models.search import SearchPayload
@@ -93,14 +93,7 @@ def get_vector_cache() -> VectorCache:
 
 
 def get_adapter(source: str):
-    executor = RequestExecutor(settings=settings)
-    repo = get_repository()
-
-    if source == "workua":
-        return WorkUaAdapter(executor, repo)
-    if source == "robotaua":
-        return RobotaUaAdapter(executor, repo)
-    raise ValueError(f"Unknown source: {source}")
+    return get_legacy_adapter(source)
 
 
 def extract_resume_id(url: str) -> Optional[str]:

@@ -18,8 +18,8 @@ async def test_analysis_freshness_flag_off_uses_local_validator(monkeypatch):
         False,
     )
     monkeypatch.setattr(
-        orchestrator.FreshnessValidator,
-        "is_fresh",
+        orchestrator,
+        "check_freshness_with_legacy_validator",
         local_validator,
     )
     monkeypatch.setattr(
@@ -53,8 +53,8 @@ async def test_analysis_freshness_flag_on_uses_parser_service(monkeypatch):
         True,
     )
     monkeypatch.setattr(
-        orchestrator.FreshnessValidator,
-        "is_fresh",
+        orchestrator,
+        "check_freshness_with_legacy_validator",
         local_validator,
     )
     monkeypatch.setattr(
