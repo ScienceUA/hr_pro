@@ -2,3 +2,20 @@
 .venv/
 __pycache__/
 .DS_Store
+
+# Runtime/generated local artifacts
+out/
+*.jsonl
+analysis.json
+analysis_mock.json
+report.md
+report_mock.md
+result.jsonl
+resume.json
+/rabota_page.html
+/vacancy.txt
+/structure.txt
+scratch/
+
+# Local rescue/baseline audit snapshots
+rescue_*.txt
