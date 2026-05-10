@@ -7,7 +7,7 @@ from typing import Set, Union
 
 from google.cloud import storage
 
-from parser_service.parsing.models import ParsingResult
+from app.models.parsed_resume import CoreParsedResume
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class BaseRepository(ABC):
         pass
 
     @abstractmethod
-    def save_result(self, result: ParsingResult):
+    def save_result(self, result: CoreParsedResume):
         pass
 
     @abstractmethod
@@ -56,7 +56,9 @@ class LocalStorage(BaseRepository):
                     continue
                 try:
                     data = json.loads(line)
-                    resume_id = (data.get("payload") or {}).get("resume_id")
+                    resume_id = data.get("resume_id") or (
+                        data.get("payload") or {}
+                    ).get("resume_id")
                     if resume_id:
                         self._seen_ids.add(str(resume_id))
                     else:
@@ -70,9 +72,10 @@ class LocalStorage(BaseRepository):
     def exists(self, resume_id: str) -> bool:
         return str(resume_id) in self._seen_ids
 
-    def save_result(self, result: ParsingResult):
-        dedup_key = str(result.payload.resume_id) if (result.payload and hasattr(
-            result.payload, "resume_id") and result.payload.resume_id) else "url:" + str(result.url or "")
+    def save_result(self, result: CoreParsedResume):
+        dedup_key = (
+            str(result.resume_id) if result.resume_id else "url:" + str(result.url or "")
+        )
         if dedup_key in self._seen_ids:
             return
 
@@ -139,9 +142,10 @@ class GCSStorage(BaseRepository):
         blob = self.bucket.blob(blob_name)
         return blob.exists()
 
-    def save_result(self, result: ParsingResult):
-        dedup_key = str(result.payload.resume_id) if (result.payload and hasattr(
-            result.payload, "resume_id") and result.payload.resume_id) else "url:" + str(result.url or "")
+    def save_result(self, result: CoreParsedResume):
+        dedup_key = (
+            str(result.resume_id) if result.resume_id else "url:" + str(result.url or "")
+        )
         blob_name = self._get_blob_name(dedup_key)
         blob = self.bucket.blob(blob_name)
 

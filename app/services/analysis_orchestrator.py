@@ -3,13 +3,17 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.config.settings import settings
+from app.models.parsed_resume import (
+    CoreParsedResume,
+    core_parsed_resume_from_legacy_result,
+    core_parsed_resume_from_parser_service_response,
+)
 from app.services.parser_runtime_service import (
     check_freshness_with_parser_service,
     parse_resume_with_parser_service,
 )
 from parser_service.execution.executor import RequestExecutor
 from parser_service.freshness_validator import FreshnessValidator
-from parser_service.parsing.models import ParsingResult
 from parser_service.sources.robotaua import RobotaUaAdapter
 from parser_service.sources.workua import WorkUaAdapter
 
@@ -128,9 +132,9 @@ def _filter_new_urls(urls: List[str]) -> Tuple[List[str], int]:
 async def parse_resumes_with_parser_service(
     payload: SearchPayload,
     urls: List[str],
-) -> Tuple[Dict[str, Any], List[ParsingResult]]:
+) -> Tuple[Dict[str, Any], List[CoreParsedResume]]:
     stats = {"saved": 0, "errors": 0, "skipped": 0, "critical_error": None}
-    results: List[ParsingResult] = []
+    results: List[CoreParsedResume] = []
 
     for url in urls:
         response = await parse_resume_with_parser_service(
@@ -147,7 +151,7 @@ async def parse_resumes_with_parser_service(
             continue
 
         try:
-            result = ParsingResult.model_validate(response.get("data") or {})
+            result = core_parsed_resume_from_parser_service_response(response)
         except Exception as e:
             stats["errors"] += 1
             logger.error(
@@ -210,7 +214,7 @@ async def run_analysis_task(session_id: str, payload: SearchPayload):
 
         target_count = payload.pages * 20
         delta = max(0, target_count - len(fresh_items))
-        newly_parsed_resumes: List[ParsingResult] = []
+        newly_parsed_resumes: List[Any] = []
         skipped_duplicates = 0
         repo = get_repository()
 
@@ -248,7 +252,7 @@ async def run_analysis_task(session_id: str, payload: SearchPayload):
 
                 for result in newly_parsed_resumes:
                     try:
-                        repo.save_result(result)
+                        repo.save_result(_to_core_parsed_resume(result))
                     except Exception as e:
                         logger.error("Failed to save raw result: %s", e)
 
@@ -386,3 +390,9 @@ def _as_resume_dict(result: Any) -> Dict[str, Any]:
     if isinstance(result, dict):
         return result
     raise TypeError(f"Unsupported parsing result type: {type(result)}")
+
+
+def _to_core_parsed_resume(result: Any) -> CoreParsedResume:
+    if isinstance(result, CoreParsedResume):
+        return result
+    return core_parsed_resume_from_legacy_result(result)

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 import app.services.analysis_orchestrator as orchestrator
+from app.models.parsed_resume import CoreParsedResume
 from app.models.search import SearchPayload
 from parser_service.parsing.models import (
     DataQuality,
@@ -141,7 +142,7 @@ async def test_analysis_parse_flag_on_uses_parser_service_for_deduped_urls(
 
 
 @pytest.mark.asyncio
-async def test_parser_service_parse_data_becomes_parsing_result(monkeypatch):
+async def test_parser_service_parse_data_becomes_core_parsed_resume(monkeypatch):
     parser_service_parse = AsyncMock(return_value=_parser_service_response())
     monkeypatch.setattr(
         orchestrator,
@@ -156,10 +157,10 @@ async def test_parser_service_parse_data_becomes_parsing_result(monkeypatch):
 
     assert stats == {"saved": 1, "errors": 0, "skipped": 0, "critical_error": None}
     assert len(results) == 1
-    assert isinstance(results[0], ParsingResult)
+    assert isinstance(results[0], CoreParsedResume)
     assert results[0].url == "https://www.work.ua/resumes/123/"
-    assert results[0].payload.resume_id == "123"
-    assert results[0].model_dump()["payload"]["title"] == "Python Developer"
+    assert results[0].resume_id == "123"
+    assert results[0].payload["title"] == "Python Developer"
 
 
 @pytest.mark.asyncio
