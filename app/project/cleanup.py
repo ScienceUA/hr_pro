@@ -1,39 +1,58 @@
 import argparse
+import logging
+import os
 from pathlib import Path
+from typing import Optional
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-OUT_DIR = PROJECT_ROOT / "out"
+from google.cloud import storage
+import redis
 
-def cleanup_project(role_slug: str = None):
-    if not OUT_DIR.exists():
-        print(f"Папка {OUT_DIR} не існує. Немає файлів для очищення.")
-        return
+from app.storage.repository import get_repository
 
-    patterns = []
-    if role_slug:
-        patterns.append(f"result_*{role_slug}*.jsonl")
-        patterns.append(f"result_llm_*{role_slug}*.json")
-        patterns.append(f"result_llm_*{role_slug}*.md")
-    else:
-        patterns.append("result_*.jsonl")
-        patterns.append("result_llm_*.json")
-        patterns.append("result_llm_*.md")
+logger = logging.getLogger(__name__)
 
-    deleted_count = 0
-    for pattern in patterns:
-        for filepath in OUT_DIR.glob(pattern):
-            try:
-                filepath.unlink()
-                print(f"Видалено: {filepath.name}")
-                deleted_count += 1
-            except Exception as e:
-                print(f"Помилка видалення {filepath.name}: {e}")
+
+def cleanup_project(session_id: str = None, dry_run: bool = False):
+    """
+    Cleans up temporary session files and optionally clears Redis/GCS state.
+    Uses the Repository Strategy pattern for storage cleanup.
+    """
+    repo = get_repository()
     
-    print(f"Очищення завершено. Всього видалено файлів: {deleted_count}")
+    # 1. Storage Cleanup (Local or GCS)
+    deleted_count = repo.cleanup(session_id=session_id, dry_run=dry_run)
+    logger.info(f"Storage cleanup finished. Total items {'marked for deletion' if dry_run else 'deleted'}: {deleted_count}")
+
+    # 2. Redis Cleanup (Optional - clearing old task statuses)
+    redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+    if redis_url and not dry_run:
+        try:
+            r = redis.from_url(redis_url, decode_responses=True)
+            # We look for task keys. In a real system, we'd only delete expired ones,
+            # but task_status already has a TTL (e.g. 24h).
+            keys = r.keys("task:*")
+            if keys:
+                logger.info(f"Redis has {len(keys)} task keys. They will expire based on TTL.")
+                # If we really wanted to force clear:
+                # r.delete(*keys)
+        except Exception as e:
+            logger.error(f"Redis check failed: {e}")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Очищення результатів проєкту")
-    parser.add_argument("--role", type=str, default=None, help="Назва вакансії (наприклад 'sales-director') для видалення")
+    logging.basicConfig(level=logging.INFO)
+    parser = argparse.ArgumentParser(description="HR-Pro project cleanup utility")
+    parser.add_argument(
+        "--role",
+        type=str,
+        default=None,
+        help="Filter by role slug (e.g. 'sales-director')",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deleted without actually deleting",
+    )
     args = parser.parse_args()
-    
-    cleanup_project(args.role)
+
+    cleanup_project(args.role, dry_run=args.dry_run)

@@ -1,0 +1,56 @@
+swagger: "2.0"
+info:
+  title: HR-Pro API Gateway
+  description: Routing configuration for HR-Pro Microservices (Core & Parser)
+  version: "1.0.0"
+schemes:
+  - "https"
+produces:
+  - "application/json"
+paths:
+  /preview:
+    post:
+      summary: "Preview resumes count"
+      operationId: previewResumes
+      x-google-backend:
+        address: https://hr-pro-core-xxxxx.a.run.app/preview
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        '200':
+          description: "A successful response"
+  /analyze:
+    post:
+      summary: "Start background analysis"
+      operationId: analyzeResumes
+      x-google-backend:
+        address: https://hr-pro-core-xxxxx.a.run.app/analyze
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        '202':
+          description: "Accepted"
+  /status/{session_id}:
+    get:
+      summary: "Get analysis status"
+      operationId: getStatus
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          type: string
+      x-google-backend:
+        address: https://hr-pro-core-xxxxx.a.run.app/status
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        '200':
+          description: "A successful response"
+  /parser/parse:
+    post:
+      summary: "Internal: Trigger parsing from external source"
+      operationId: triggerParser
+      x-google-backend:
+        # Note: Parser service is hosted on a separate Google Cloud Account
+        address: https://hr-pro-parser-yyyyy.a.run.app/parse
+        path_translation: APPEND_PATH_TO_ADDRESS
+      responses:
+        '200':
+          description: "Parsed canonical models"

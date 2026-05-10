@@ -1,45 +1,46 @@
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-class ExperienceBlock(BaseModel):
+
+class Experience(BaseModel):
     company: Optional[str] = None
-    position: Optional[str] = None
+    role: Optional[str] = None
     period: Optional[str] = None
-    duration: Optional[str] = None
     description: Optional[str] = None
 
-class EducationBlock(BaseModel):
+
+class Education(BaseModel):
     institution: Optional[str] = None
     degree: Optional[str] = None
-    specialty: Optional[str] = None
-    period: Optional[str] = None
+    year_end: Optional[int] = None
 
-class LanguageSkill(BaseModel):
-    name: str
+
+class Language(BaseModel):
+    name: Optional[str] = None
     level: Optional[str] = None
 
-class WorkPreferences(BaseModel):
-    salary_expectation: Optional[str] = None
-    employment_type: List[str] = []
-    schedule: List[str] = []
 
-class ResumeJSON(BaseModel):
-    """Детальная структура резюме"""
-    resume_url: str
-    resume_type: str = "standard"
-    
-    # Основная инфо
-    title: str
-    location_main: str
-    additional_locations: List[str] = []
-    age: Optional[int] = None
-    updated_at: Optional[str] = None
-    
-    # Блоки
-    experience_blocks: List[ExperienceBlock] = []
-    education_blocks: List[EducationBlock] = []
-    skills: List[str] = []
-    languages: List[LanguageSkill] = []
-    additional_courses: List[str] = []
-    
-    work_preferences: Optional[WorkPreferences] = None
+class Resume(BaseModel):
+    """Канонічна модель профілю кандидата"""
+
+    id: str = Field(..., description="Унікальний ідентифікатор резюме")
+    source: str = Field(
+        ..., description="Джерело походження ('workua', 'robotaua', тощо)"
+    )
+    url: str = Field(..., description="Повне посилання на профіль")
+    title: str = Field(..., description="Вказана посада кандидата")
+    salary: Optional[str] = Field(None, description="Очікувана зарплата")
+    location: Optional[str] = Field(
+        None, description="Місто проживання або готовність до релокейту/remote"
+    )
+    skills: List[str] = Field(
+        default_factory=list, description="Ключові навички (Tags)"
+    )
+    summary: Optional[str] = Field(
+        None, description="Розділ 'Про себе' або текст із завантаженого CV"
+    )
+    experience: List[Experience] = Field(
+        default_factory=list, description="Досвід роботи"
+    )
+    education: List[Education] = Field(default_factory=list, description="Освіта")
+    languages: List[Language] = Field(default_factory=list, description="Знання мов")

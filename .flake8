@@ -1,0 +1,5 @@
+[flake8]
+max-line-length = 120
+per-file-ignores =
+    # SYSTEM_PROMPT contains intentionally long natural-language lines that cannot be wrapped
+    app/api/endpoints.py:E501

@@ -27,7 +27,7 @@ secrets.env
 
 # Output artifacts (must not be baked into image)
 out/
-result.jsonl
+out/result.jsonl
 out.jsonl
 report*.md
 analysis*.json

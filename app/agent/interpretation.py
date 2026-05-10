@@ -5,38 +5,44 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List
 from pydantic import BaseModel, Field
-from app.services.llm_client import real_llm_chat # Підключаємо LLM для аналізу критеріїв
+from app.services.llm_client import (
+    real_llm_chat,
+)  # Підключаємо LLM для аналізу критеріїв
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKUA_MAP_PATH = PROJECT_ROOT / "app" / "config" / "workua_filters_map.json"
 
-SOURCE_MAP = {
-   "work": "workua",
-   "rabota": "rabotaua",
-   "linkedin": "linkedin"
-}
+SOURCE_MAP = {"work": "workua", "robota": "robotaua", "linkedin": "linkedin"}
+
 
 class SearchPayload(BaseModel):
-    """Суворий контракт даних для всіх джерел (Work, Rabota, LinkedIn)"""
+    """Суворий контракт даних для всіх джерел (Work, robota, LinkedIn)"""
+
     query: str
     city: str = "ukraine"
-    allowed_sources: List[str] = ["workua", "rabotaua", "linkedin"] # Додано linkedin
+    allowed_sources: List[str] = ["workua", "robotaua", "linkedin"]  # Додано linkedin
     age_from: Optional[int] = None
     age_to: Optional[int] = None
-    gender: Optional[str] = None         # "male", "female"
+    gender: Optional[str] = None  # "male", "female"
     salary_min: Optional[int] = None
     salary_max: Optional[int] = None
-    days: Optional[int] = None           # Кількість днів пошуку
-    category: Optional[str] = None       # "it", "hr" тощо
-    experience_label: Optional[str] = None # "no_experience", "1-2_years" тощо
-    languages: List[str] = Field(default_factory=list) # Список мов
-    employment: Optional[str] = None     # full_time, part_time тощо
-    education: Optional[str] = None      # higher, secondary тощо
+    days: Optional[int] = None  # Кількість днів пошуку
+    category: Optional[str] = None  # "it", "hr" тощо
+    experience_label: Optional[str] = None  # "no_experience", "1-2_years" тощо
+    languages: List[str] = Field(default_factory=list)  # Список мов
+    employment: Optional[str] = None  # full_time, part_time тощо
+    education: Optional[str] = None  # higher, secondary тощо
     with_photo: bool = False
     with_file: bool = False
     only_disabled: bool = False
     only_students: bool = False
+    # --- Обмеження видачі ---
+    limit: Optional[int] = None
+    limit_per_source: bool = False
+
+
 NEGATION_WORDS = ["кроме", "без", "не"]
+
 
 def interpret_query(user_text: str) -> dict:
     user_text = (user_text or "").strip()
@@ -45,7 +51,10 @@ def interpret_query(user_text: str) -> dict:
 
     # 0) Витягуємо direct_url, якщо користувач передав посилання на один із підтримуваних сайтів
     # Підтримуємо: work.ua, happymonday.ua, djinni.co, robota.ua, ua.jooble.org
-    url_match = re.search(r"(https?://(?:www\.)?(?:work\.ua/resumes|happymonday\.ua|djinni\.co|robota\.ua|ua\.jooble\.org)[^\s]*)", user_text)
+    url_match = re.search(
+        r"(https?://(?:www\.)?(?:work\.ua/resumes|happymonday\.ua|djinni\.co|robota\.ua|ua\.jooble\.org)[^\s]*)",
+        user_text,
+    )
     direct_url = None
     if url_match:
         direct_url = url_match.group(1).strip()
@@ -83,21 +92,36 @@ def interpret_query(user_text: str) -> dict:
     # 4) Extract role keywords for Work.ua search
     # Work.ua НЕ має фільтру "категорія резюме" — тільки ключові слова
     # Витягуємо перші 2-3 ключові слова як пошуковий запит
-    
+
     tokens = query_text.lower().split()
-    
+
     # Видаляємо стоп-слова (службові слова)
-    stop_words = {"з", "по", "для", "та", "і", "в", "на", "у", "роботи", "досвід", "років", "роки", "рік"}
+    stop_words = {
+        "з",
+        "по",
+        "для",
+        "та",
+        "і",
+        "в",
+        "на",
+        "у",
+        "роботи",
+        "досвід",
+        "років",
+        "роки",
+        "рік",
+    }
     keywords = [t for t in tokens if t not in stop_words and len(t) > 2]
-    
+
     # Беремо перші 2-3 ключові слова для пошуку
-    search_keywords = keywords[:3] if len(keywords) >= 3 else keywords[:2] if len(keywords) >= 2 else keywords
-    
-    # Все інше — семантичні критерії для LLM
-    semantic_keywords = keywords[len(search_keywords):]
-    
+    search_keywords = (
+        keywords[:3]
+        if len(keywords) >= 3
+        else keywords[:2] if len(keywords) >= 2 else keywords
+    )
+
+    # Перші 2-3 ключових слова → пошуковий запит; решта враховується LLM через criteria_bundle
     search_query = " ".join(search_keywords)
-    semantic_criteria = semantic_keywords
 
     # 5) Build CriteriaBundle: інтелектуальний поділ на обов'язкові (must) та бажані (semantic) критерії
     extraction_prompt = (
@@ -107,37 +131,34 @@ def interpret_query(user_text: str) -> dict:
         "2. age_from / age_to: числа або null.\n"
         "3. gender: male / female / null.\n"
         "4. salary_min / salary_max: числа або null.\n"
-        "5. experience_label: one of "
-        "no_experience, under_1_year, 1-2_years, 2-5_years, 5-10_years, more_10_years, null.\n"
+        "5. experience_label: one of no_experience, under_1_year, 1-2_years, 2-5_years, 5-10_years, more_10_years, null.\n"
         "6. days: число днів або null.\n"
         "7. category: коротка категорія, напр. it, hr, sales, null.\n"
-        "8. employment: one of "
-        "full_time, part_time, remote, project, shift, internship, seasonal, null.\n"
-        "9. education: one of "
-        "higher, incomplete_higher, secondary_special, secondary, null.\n"
+        "8. employment: one of full_time, part_time, remote, project, shift, internship, seasonal, null.\n"
+        "9. education: one of higher, incomplete_higher, secondary_special, secondary, null.\n"
         "10. languages: масив рядків.\n"
         "11. with_photo, with_file, only_disabled, only_students: true/false.\n"
-        "12. must: список обов'язкових критеріїв.\n"
-        "13. semantic: список бажаних критеріїв.\n"
+        "12. internal_mandatory: список обов'язкових вимог (що кандидат точно повинен вміти/мати).\n"
+        "13. desirable: список бажаних вимог (що буде плюсом).\n"
         "Поверни тільки JSON без markdown."
     )
-    
+
     try:
-        llm_response = real_llm_chat([
-            {"role": "system", "content": extraction_prompt},
-            {"role": "user", "content": user_text}
-        ])
-        # Очищення від можливих markdown-тегів
-        clean_json_str = llm_response.strip('` \n').replace('json\n', '')
+        llm_response = real_llm_chat(
+            [
+                {"role": "system", "content": extraction_prompt},
+                {"role": "user", "content": user_text},
+            ]
+        )
+        clean_json_str = llm_response.strip("` \n").replace("json\n", "")
         parsed_criteria = json.loads(clean_json_str)
-    except Exception as e:
-        # Fallback, якщо LLM не відповів коректно або виникла помилка
+    except Exception:  # noqa: BLE001
         parsed_criteria = {
             "role": query_text,
-            "must": [],
-            "semantic": [user_text]
+            "internal_mandatory": [],
+            "desirable": [user_text],
         }
-    
+
     if experience_label_hint and not parsed_criteria.get("experience_label"):
         parsed_criteria["experience_label"] = experience_label_hint
 
@@ -146,12 +167,11 @@ def interpret_query(user_text: str) -> dict:
     parsed_criteria.setdefault("education", None)
     parsed_criteria.setdefault("languages", [])
 
+    # Нова Тріо-модель
     criteria_bundle: Dict[str, Any] = {
-        "must": parsed_criteria.get("must", []),
-        "must_not": [],
-        "semantic": parsed_criteria.get("semantic", []),
+        "internal_mandatory": parsed_criteria.get("internal_mandatory", []),
+        "desirable": parsed_criteria.get("desirable", []),
         "role_anchors": [parsed_criteria.get("role", "")],
-        "uncertainties": [],
         "source_query": user_text,
     }
 
@@ -159,35 +179,38 @@ def interpret_query(user_text: str) -> dict:
     query_text = parsed_criteria.get("role", query_text)
     search_query = query_text
 
-    # 5.1) Фільтрація джерел на основі запиту користувача
+    # 5.1) Фільтрація джерел на основі запиту користувача (Строга Формула)
     text_lower = user_text.lower()
-    active_sources = list(SOURCE_MAP.values())
-    mentioned_sources = []
+    active_sources = list(SOURCE_MAP.values())  # За замовчуванням шукаємо скрізь
 
-    for keyword, source_id in SOURCE_MAP.items():
-        if keyword in text_lower:
-            start_idx = text_lower.find(keyword)
-            # Перевіряємо 10 символів перед знайденим словом на наявність заперечень
-            prefix = text_lower[max(0, start_idx-10):start_idx]
-            is_negated = any(neg in prefix for neg in NEGATION_WORDS)
-            
-            if is_negated:
-                if source_id in active_sources:
-                    active_sources.remove(source_id)
-            else:
-                mentioned_sources.append(source_id)
+    # Шукаємо явну формулу: "шукати на [джерела]" або "джерела: [джерела]"
+    formula_match = re.search(
+        r"(?:шукати|пошук|джерела)[:\s]+(?:тільки\s+)?(?:на\s+)?([a-z\,\.\s]+)",
+        text_lower,
+    )
 
-    # Якщо користувач прямо вказав конкретні сайти (і не відмінив їх), залишаємо тільки їх
-    clean_query = search_query
-    if mentioned_sources:
-        active_sources = [s for s in mentioned_sources if s in active_sources]
-        # Очищаємо запит від назв джерел (напр. "на robota.ua"), щоб вони не псували пошук
-        for kw in SOURCE_MAP.keys():
-            clean_query = re.sub(rf"(\s*на\s+)?{kw}(\.ua)?", "", clean_query, flags=re.IGNORECASE).strip()
+    if formula_match:
+        formula_text = formula_match.group(1)
+        explicit_sources = []
+        for keyword, source_id in SOURCE_MAP.items():
+            if keyword in formula_text:
+                explicit_sources.append(source_id)
+
+        if explicit_sources:
+            active_sources = explicit_sources
+
+    # Очищаємо фінальний запит (посаду) від можливого сміття з формули
+    clean_query = parsed_criteria.get("role", search_query)
+    for kw in SOURCE_MAP.keys():
+        clean_query = re.sub(
+            rf"(?i)(?:шукати|пошук|джерела)?[:\s]*(?:тільки\s+)?(?:на\s+)?{kw}(\.ua|\.com)?",
+            "",
+            clean_query,
+        ).strip()
 
     # 6) Build Search payload (Валідація через Pydantic)
     payload_obj = SearchPayload(
-        query=parsed_criteria.get("role", search_query),
+        query=clean_query,
         city=city_slug or "ukraine",
         allowed_sources=active_sources,
         age_from=parsed_criteria.get("age_from"),
@@ -204,19 +227,32 @@ def interpret_query(user_text: str) -> dict:
         with_photo=parsed_criteria.get("with_photo", False),
         with_file=parsed_criteria.get("with_file", False),
         only_disabled=parsed_criteria.get("only_disabled", False),
-        only_students=parsed_criteria.get("only_students", False)
+        only_students=parsed_criteria.get("only_students", False),
+        limit=None,
+        limit_per_source=False,
     )
-    
+
     # Конвертуємо в словник для адаптерів
     search_payload = payload_obj.model_dump()
-    search_payload["pages"] = 5
-    search_payload["out"] = "result.jsonl"
+    search_payload["pages"] = 100
+    search_payload["out"] = "out/result.jsonl"
     search_payload["params"] = {}
 
-    # Маппінг для Work.ua (старі ID)
-    exp_map_work = {"no_experience": 0, "under_1_year": 1, "1-2_years": 164, "2-5_years": 165, "more_10_years": 166}
-    if payload_obj.experience_label in exp_map_work:
-        search_payload["params"]["experience"] = [exp_map_work[payload_obj.experience_label]]
+    # Каскадний мапінг для Work.ua: включаємо цільовий досвід і всі вищі рівні
+    # ID на Work.ua: 0 (без), 1 (до 1), 164 (1-2), 165 (2-5), 166 (5+)
+    exp_cascade_work = {
+        "no_experience": [0, 1, 164, 165, 166],
+        "under_1_year": [1, 164, 165, 166],
+        "1-2_years": [164, 165, 166],
+        "2-5_years": [165, 166],
+        "5-10_years": [166],
+        "more_10_years": [166],
+    }
+
+    if payload_obj.experience_label in exp_cascade_work:
+        search_payload["params"]["experience"] = exp_cascade_work[
+            payload_obj.experience_label
+        ]
 
     # Додаємо пряме посилання до payload, якщо воно є
     if direct_url:
@@ -224,9 +260,11 @@ def interpret_query(user_text: str) -> dict:
 
     return {"criteria_bundle": criteria_bundle, "search_payload": search_payload}
 
+
 # -------------------------
 # Helpers
 # -------------------------
+
 
 def _try_load_workua_map() -> Optional[Dict[str, Any]]:
     if not WORKUA_MAP_PATH.exists():
@@ -239,7 +277,9 @@ def _try_load_workua_map() -> Optional[Dict[str, Any]]:
         return None
 
 
-def _extract_query_and_city(user_text: str, workua_map: Optional[Dict[str, Any]]) -> Tuple[str, Optional[str]]:
+def _extract_query_and_city(
+    user_text: str, workua_map: Optional[Dict[str, Any]]
+) -> Tuple[str, Optional[str]]:
     clean = re.sub(r"\s+", " ", user_text).strip()
     if not clean:
         return "", None
@@ -285,13 +325,17 @@ def _extract_query_and_city(user_text: str, workua_map: Optional[Dict[str, Any]]
         cand = m.group(1).strip().lower()
         known_city_slug = _match_city_slug(cand, workua_map)
         if known_city_slug:
-            query_text = re.sub(r"(?:city\s*[:=]\s*)([a-z0-9_-]+)$", "", clean, flags=re.IGNORECASE).strip()
+            query_text = re.sub(
+                r"(?:city\s*[:=]\s*)([a-z0-9_-]+)$", "", clean, flags=re.IGNORECASE
+            ).strip()
             return query_text, known_city_slug
 
     return clean, None
 
 
-def _match_city_slug(candidate: str, workua_map: Optional[Dict[str, Any]]) -> Optional[str]:
+def _match_city_slug(
+    candidate: str, workua_map: Optional[Dict[str, Any]]
+) -> Optional[str]:
     """
     Validate city slug against workua_filters_map.json if available.
     We only accept a city if it exists in map; otherwise return None.
@@ -315,11 +359,16 @@ def _match_city_slug(candidate: str, workua_map: Optional[Dict[str, Any]]) -> Op
     # Case A: dict with "values": [...]
     if isinstance(location, dict) and isinstance(location.get("values"), list):
         for item in location["values"]:
-            if isinstance(item, dict) and str(item.get("slug", "")).lower() == candidate:
+            if (
+                isinstance(item, dict)
+                and str(item.get("slug", "")).lower() == candidate
+            ):
                 return candidate
 
     # Case B: dict of slugs -> ...
-    if isinstance(location, dict) and candidate in {str(k).lower() for k in location.keys()}:
+    if isinstance(location, dict) and candidate in {
+        str(k).lower() for k in location.keys()
+    }:
         return candidate
 
     # Case C: nested search (best-effort)

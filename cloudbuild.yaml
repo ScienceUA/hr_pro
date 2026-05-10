@@ -1,0 +1,76 @@
+steps:
+  # Step 1: Linting and Code Formatting Check
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install flake8 black
+        black --check .
+        flake8 app/ parser_service/
+
+  # Step 2: Install dependencies and run tests for Core and Parser
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install poetry
+        poetry config virtualenvs.create false
+        poetry install --no-interaction --no-ansi
+        pytest tests/
+
+  # Step 3: Build the Core container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/hr-pro-core:$COMMIT_SHA', '-f', 'Dockerfile', '.']
+
+  # Step 4: Build the Parser Service container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/hr-pro-parser:$COMMIT_SHA', '-f', 'parser_service/Dockerfile', '.']
+
+  # Step 5: Push the Core image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/hr-pro-core:$COMMIT_SHA']
+
+  # Step 6: Push the Parser image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/hr-pro-parser:$COMMIT_SHA']
+
+  # Step 7: Deploy Core to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hr-pro-core'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/hr-pro-core:$COMMIT_SHA'
+      - '--region'
+      - 'europe-west1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+
+  # Step 8: Deploy Parser Service to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hr-pro-parser'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/hr-pro-parser:$COMMIT_SHA'
+      - '--region'
+      - 'europe-west1'
+      - '--platform'
+      - 'managed'
+      # Note: For production, this should be deployed to the secondary account project.
+      # '--project', 'secondary-project-id'
+      - '--no-allow-unauthenticated' # Internal API only
+
+images:
+  - 'gcr.io/$PROJECT_ID/hr-pro-core:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/hr-pro-parser:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

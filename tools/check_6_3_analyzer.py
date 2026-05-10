@@ -2,7 +2,6 @@ import json
 
 from app.services.analyzer import ResumeAnalyzer
 
-
 SYSTEM_PROMPT = """
 You are a strict resume evaluation engine.
 
@@ -23,14 +22,24 @@ Rules (non-negotiable):
 def fake_llm(messages):
     # Имитируем корректный JSON-ответ модели.
     # Важно: этот тест проверяет схему/валидацию, а не качество решения.
-    return json.dumps({
-        "verdict": "CONDITIONAL",
-        "reasoning": "Some required skills are not explicitly mentioned.",
-        "evidence": [
-            {"source_field": "summary", "quote": "Project management and stakeholder communication", "supports": "project management experience"}
-        ],
-        "missing_criteria": ["explicit Scrum certification", "English level B2 explicitly stated"]
-    }, ensure_ascii=False)
+    return json.dumps(
+        {
+            "verdict": "CONDITIONAL",
+            "reasoning": "Some required skills are not explicitly mentioned.",
+            "evidence": [
+                {
+                    "source_field": "summary",
+                    "quote": "Project management and stakeholder communication",
+                    "supports": "project management experience",
+                }
+            ],
+            "missing_criteria": [
+                "explicit Scrum certification",
+                "English level B2 explicitly stated",
+            ],
+        },
+        ensure_ascii=False,
+    )
 
 
 def main():
@@ -40,7 +49,7 @@ def main():
     resume_json = {
         "url": "https://work.ua/resumes/123456/",
         "title": "Project Manager",
-        "summary": "Project management and stakeholder communication"
+        "summary": "Project management and stakeholder communication",
     }
 
     # Минимальный CriteriaBundle (структура любая — анализатор сейчас принимает dict)
@@ -48,7 +57,7 @@ def main():
         "search": {"query": "Project Manager", "city": "kyiv", "params": {}},
         "must": ["project management experience"],
         "must_not": [],
-        "semantic": ["communication", "leadership"]
+        "semantic": ["communication", "leadership"],
     }
 
     result = analyzer.analyze(resume_json=resume_json, criteria_bundle=criteria_bundle)

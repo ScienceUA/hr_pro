@@ -67,9 +67,10 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
  && pip install --no-cache-dir sentence-transformers
 # ==================================================================
 
-# Copy only what is needed to run the agent (keep surface small)
+# Copy only what is needed to run the core app
 COPY --chown=hruser:hruser app/ ./app/
-COPY --chown=hruser:hruser run_agent.py ./
+COPY --chown=hruser:hruser parser_service/ ./parser_service/
+COPY --chown=hruser:hruser main.py ./
 COPY --chown=hruser:hruser pyproject.toml ./
 COPY --chown=hruser:hruser README.md ./
 
@@ -84,11 +85,12 @@ RUN mkdir -p /app/out /app/logs /app/.cache \
 
 # Safety: make code read-only inside image (defense-in-depth)
 RUN chmod -R 555 /app/app \
- && chmod 555 /app/run_agent.py
+ && chmod -R 555 /app/parser_service \
+ && chmod 555 /app/main.py
 
 # Ensure default output file is writable even with read_only rootfs:
-RUN ln -sf /app/out/result.jsonl /app/result.jsonl \
- && chown -h hruser:hruser /app/result.jsonl
+RUN ln -sf /app/out/out/result.jsonl /app/out/result.jsonl \
+ && chown -h hruser:hruser /app/out/result.jsonl
 
 # === ПЕРЕХОД НА ПОЛЬЗОВАТЕЛЯ ===
 USER hruser
@@ -100,4 +102,5 @@ func(['Тест українською', 'Тест на русском'])"
 
 VOLUME ["/app/out"]
 
-CMD ["python", "run_agent.py"]
+# Entrypoint for FastAPI (will be added in Phase 1) or CLI
+CMD ["python", "main.py"]

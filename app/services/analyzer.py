@@ -2,11 +2,12 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence
 from pydantic import ValidationError
 from app.models.agent import AnalysisResult
 
 logger = logging.getLogger(__name__)
+
 
 class ResumeAnalyzerError(RuntimeError):
     pass
@@ -40,40 +41,55 @@ class ResumeAnalyzer:
     # Public API
     # -----------------
 
-    def analyze(self, resume_json: Dict[str, Any], criteria_bundle: Dict[str, Any]) -> Optional[AnalysisResult]:
+    def analyze(
+        self, resume_json: Dict[str, Any], criteria_bundle: Dict[str, Any]
+    ) -> Optional[AnalysisResult]:
         # ПРОВЕРКА 1: Защищённое резюме (требуется авторизация)
         page_type = resume_json.get("page_type", "").upper()
         if page_type in ("LOGIN", "PROTECTED"):
-            logger.info(f"Protected resume detected: {resume_json.get('url', 'UNKNOWN_URL')}")
+            logger.info(
+                f"Protected resume detected: {resume_json.get('url', 'UNKNOWN_URL')}"
+            )
             return AnalysisResult(
                 verdict="REJECT",
                 reasoning="Не відповідає обов'язковим критеріям, або закрита інформація резюме.",
                 evidence=[],
                 missing_criteria=["Повний текст резюме недоступний"],
-                interview_questions=[]
             )
-        
+
         # ПРОВЕРКА 2: Полностью пустое резюме (только title, без данных)
         payload = resume_json.get("payload", resume_json)
-        has_title = bool(payload.get("title") or payload.get("position") or payload.get("candidate_title"))
+        has_title = bool(
+            payload.get("title")
+            or payload.get("position")
+            or payload.get("candidate_title")
+        )
         has_skills = bool(payload.get("skills"))
         has_experience = bool(payload.get("experience"))
         has_education = bool(payload.get("education"))
         has_about_raw = bool(payload.get("about_raw"))
-        
-        if has_title and not (has_skills or has_experience or has_education or has_about_raw):
-            logger.warning(f"Empty resume (only title): {resume_json.get('url', 'UNKNOWN_URL')}")
+
+        if has_title and not (
+            has_skills or has_experience or has_education or has_about_raw
+        ):
+            logger.warning(
+                f"Empty resume (only title): {resume_json.get('url', 'UNKNOWN_URL')}"
+            )
             return None  # Пропускаем резюме полностью
-        
+
         # Диагностика: логируем resume_content для отладки
-        messages = self.prepare_prompt(resume_json=resume_json, criteria_bundle=criteria_bundle)
+        messages = self.prepare_prompt(
+            resume_json=resume_json, criteria_bundle=criteria_bundle
+        )
         resume_text = self._optimize_resume_data(resume_json)
         logger.info(f"Resume content length: {len(resume_text)} characters")
-        
+
         if not resume_text or resume_text == "NO_RESUME_TEXT_AVAILABLE":
-            logger.warning(f"Empty resume_content after optimization: {resume_json.get('url', 'UNKNOWN_URL')}")
+            logger.warning(
+                f"Empty resume_content after optimization: {resume_json.get('url', 'UNKNOWN_URL')}"
+            )
             return None  # Пропускаем резюме
-        
+
         raw = self.call_llm(messages)
         return self.parse_response(raw)
 
@@ -81,7 +97,9 @@ class ResumeAnalyzer:
     # Step 1: Prompt
     # -----------------
 
-    def prepare_prompt(self, resume_json: Dict[str, Any], criteria_bundle: Dict[str, Any]) -> List[Dict[str, str]]:
+    def prepare_prompt(
+        self, resume_json: Dict[str, Any], criteria_bundle: Dict[str, Any]
+    ) -> List[Dict[str, str]]:
         resume_text = self._optimize_resume_data(resume_json)
         resume_text = self._sanitize_text(resume_text)
 
@@ -90,45 +108,14 @@ class ResumeAnalyzer:
         criteria_payload = criteria_bundle
 
         user_content = (
-            "You will evaluate the candidate resume against the criteria_bundle.\n\n"
-
-            "CRITICAL PROCESS (follow strictly):\n"
-            "STEP 1 — Extract factual signals from resume_content.\n"
-            "  Extract concrete facts only (not assumptions):\n"
-            "  - roles and job titles\n"
-            "  - tools and platforms (e.g., Meta Ads, Google Ads, TikTok Ads, Python)\n"
-            "  - measurable metrics (ROI, CAC, CTR, budgets, % improvements)\n"
-            "  - years of experience\n"
-            "  - industries or domains\n\n"
-
-            "STEP 2 Compare extracted signals ONLY with criteria_bundle.\n"
-            "APPLY STRICT VERDICT LOGIC (HARD AUDIT):\n"
-            "- STRICT MAPPING: You are strictly forbidden to assume or infer skills based on context. If a specific tool, skill, or requirement from criteria_bundle is NOT explicitly written in resume_content, it is MISSING and MUST be added to 'missing_criteria'.\n"
-            "- If ALL 'must' criteria AND ALL 'semantic' criteria are explicitly found in the text -> verdict is 'MATCH'. In 'reasoning' state that all criteria are met.\n"
-            "- If ALL 'must' criteria are found, but SOME 'semantic' are missing -> verdict is 'CONDITIONAL'. In 'missing_criteria' list exactly what is missing.\n"            "- If ANY 'must' criteria is missing -> verdict is 'REJECT'. In 'reasoning' state strictly why it does not fit.\n"
-            # "INTERVIEW QUESTIONS LOGIC:\n"
-            # "- For MATCH: generate clarifying questions about past experience and how results were achieved.\n"
-            # "- For CONDITIONAL: generate questions to clarify missing criteria and verify ambiguous skills.\n"
-            # "- For REJECT: interview_questions MUST be an empty array [].\n"
-            "- Do not invent data.\n\n"
-
-            "STEP 3 — Produce ONE JSON object matching AnalysisResult schema.\n\n"
-
-            "STRICT OUTPUT RULES:\n"
-            "1) Output MUST be valid JSON only.\n"
-            "2) No markdown, no explanations, no comments.\n"
-            "3) All natural-language strings MUST be in Ukrainian.\n"
-            "4) Every positive claim MUST be backed by a verbatim quote from resume_content.\n\n"
-
-            "criteria_bundle (data):\n"
+            "Ось дані для аналізу. Оціни кандидата суворо за алгоритмом.\n\n"
+            "ВИМОГИ ДО КАНДИДАТА (criteria_bundle):\n"
             f"{json.dumps(criteria_payload, ensure_ascii=False, indent=2)}\n\n"
-
-            "resume_content (data):\n"
+            "ПРОФІЛЬ КАНДИДАТА (resume_content):\n"
             "<resume_content>\n"
             f"{resume_text}\n"
             "</resume_content>\n"
         )
-
 
         return [
             {"role": "system", "content": self._system_prompt},
@@ -156,7 +143,9 @@ class ResumeAnalyzer:
         obj = self._extract_first_json_object(raw_text)
         if obj is None:
             # Диагностика: логируем первые 1000 символов, если JSON не найден
-            logger.error(f"Failed to extract JSON from LLM response. First 1000 chars: {raw_text[:1000]}")
+            logger.error(
+                f"Failed to extract JSON from LLM response. First 1000 chars: {raw_text[:1000]}"
+            )
             raise LLMResponseFormatError(
                 "LLM did not return a valid JSON object. Expected a single JSON object for AnalysisResult."
             )
@@ -209,7 +198,10 @@ class ResumeAnalyzer:
 
         if isinstance(considered, list) and considered:
             # пример: ["Head of digital", "Керівник напрямку", ...]
-            position_lines.append("Розглядає посади: " + "; ".join([str(x).strip() for x in considered if str(x).strip()]))
+            position_lines.append(
+                "Розглядає посади: "
+                + "; ".join([str(x).strip() for x in considered if str(x).strip()])
+            )
         elif isinstance(considered, str) and considered.strip():
             position_lines.append("Розглядає посади: " + considered.strip())
 
@@ -223,10 +215,14 @@ class ResumeAnalyzer:
                 structured_parts.append(f"{name}:\n{value.strip()}")
                 return
             if isinstance(value, list) and value:
-                structured_parts.append(f"{name}:\n{json.dumps(value, ensure_ascii=False, indent=2)}")
+                structured_parts.append(
+                    f"{name}:\n{json.dumps(value, ensure_ascii=False, indent=2)}"
+                )
                 return
             if isinstance(value, dict) and value:
-                structured_parts.append(f"{name}:\n{json.dumps(value, ensure_ascii=False, indent=2)}")
+                structured_parts.append(
+                    f"{name}:\n{json.dumps(value, ensure_ascii=False, indent=2)}"
+                )
                 return
 
         _add_section("SKILLS", resume_json.get("skills"))
@@ -242,7 +238,7 @@ class ResumeAnalyzer:
         # -------------------------
         # Critical: Work.ua “uploaded file / quick view” lives in about_raw
         full_text_fields = [
-            "about_raw",              # ✅ key you confirmed exists and contains full text
+            "about_raw",  # ✅ key you confirmed exists and contains full text
             "full_text",
             "raw_text",
             "content",
@@ -269,10 +265,11 @@ class ResumeAnalyzer:
             final_parts.append("=== STRUCTURED ===\n" + structured_text)
         if full_text:
             # ВАЖНО: "about_raw" — это ОСНОВНОЙ блок опыта кандидата (uploaded CV)
-            final_parts.append("=== CANDIDATE EXPERIENCE SUMMARY (PRIMARY SOURCE) ===\n" + full_text)
+            final_parts.append(
+                "=== CANDIDATE EXPERIENCE SUMMARY (PRIMARY SOURCE) ===\n" + full_text
+            )
 
         return "\n\n".join(final_parts) if final_parts else "NO_RESUME_TEXT_AVAILABLE"
-
 
     def _sanitize_text(self, text: str) -> str:
         """
@@ -292,9 +289,15 @@ class ResumeAnalyzer:
 
         # Basic prompt-injection hardening: neutralize common role markers if present in resume
         # (resume must be treated as data, not instructions)
-        text = text.replace("<system>", "&lt;system&gt;").replace("</system>", "&lt;/system&gt;")
-        text = text.replace("<assistant>", "&lt;assistant&gt;").replace("</assistant>", "&lt;/assistant&gt;")
-        text = text.replace("<user>", "&lt;user&gt;").replace("</user>", "&lt;/user&gt;")
+        text = text.replace("<system>", "&lt;system&gt;").replace(
+            "</system>", "&lt;/system&gt;"
+        )
+        text = text.replace("<assistant>", "&lt;assistant&gt;").replace(
+            "</assistant>", "&lt;/assistant&gt;"
+        )
+        text = text.replace("<user>", "&lt;user&gt;").replace(
+            "</user>", "&lt;/user&gt;"
+        )
 
         return text.strip()
 
@@ -330,7 +333,9 @@ class ResumeAnalyzer:
         for i, item in enumerate(v[:12]):  # limit
             if not isinstance(item, dict):
                 continue
-            role = self._to_clean_str(item.get("position") or item.get("title") or item.get("role"))
+            role = self._to_clean_str(
+                item.get("position") or item.get("title") or item.get("role")
+            )
             company = self._to_clean_str(item.get("company"))
             period = self._to_clean_str(item.get("period") or item.get("dates"))
             desc = self._to_clean_str(item.get("description") or item.get("details"))
@@ -411,7 +416,7 @@ class ResumeAnalyzer:
                 elif ch == "}":
                     depth -= 1
                     if depth == 0:
-                        candidate = text[start:i + 1]
+                        candidate = text[start : i + 1]  # noqa: E203
                         try:
                             parsed = json.loads(candidate)
                             return parsed if isinstance(parsed, dict) else None

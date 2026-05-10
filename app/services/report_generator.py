@@ -4,7 +4,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from app.models.agent import AnalysisResult, Verdict
+# Імпортуємо тільки AnalysisResult (Verdict більше не існує)
+from app.models.agent import AnalysisResult
 
 
 class ReportGeneratorError(RuntimeError):
@@ -15,171 +16,97 @@ class ReportGeneratorError(RuntimeError):
 class ReportGenerator:
     """
     6.4 Report generator (Markdown).
-
-    Privacy rule:
-      - DO NOT output full name, phone, email, or any contact fields.
-      - Title must be only position title from resume.
-      - Link: Work.ua URL.
+    Адаптовано під нову Тріо-модель та статуси Світлофора.
     """
 
-    def generate(self, resume_json: Dict[str, Any], analysis: Optional[AnalysisResult]) -> str:
+    def generate(
+        self, resume_json: Dict[str, Any], analysis: Optional[AnalysisResult]
+    ) -> str:
         title = self._extract_position_title(resume_json) or "Невідома посада"
         url = self._extract_url(resume_json) or ""
 
-        # Handle None analysis
+        # 1. Захист: якщо аналізатор повернув None
         if analysis is None:
             return self._generate_error_block(title, url, "Помилка аналізу LLM")
-        
-        # Handle protected resume (LOGIN required)
-        if "обмежений" in analysis.reasoning.lower() or "авторизація" in analysis.reasoning.lower():
+
+        # 2. Захист: закриті контакти / авторизація
+        if (
+            "обмежений" in analysis.reasoning.lower()
+            or "авторизація" in analysis.reasoning.lower()
+        ):
             return self._generate_protected_block(title, url)
 
-        verdict_emoji = self._verdict_to_emoji(analysis.verdict)
-
-        evidence_lines = self._format_evidence(analysis)
-        missing_lines = self._format_missing(analysis)
-        questions_lines = self._format_questions(analysis)
-
-        # IMPORTANT: We intentionally do NOT include any name/contact fields from resume_json.
-        md: list[str] = []
-
-        # -------- Detect "data unavailable" resumes (Work.ua restricted/undecoded) --------
+        # 3. Перевірка на "порожню сторінку" (за новою канонічною моделлю)
         payload = resume_json.get("payload")
         src = payload if isinstance(payload, dict) else resume_json
-
         page_type = resume_json.get("page_type") or src.get("page_type")
 
-        has_uploaded_file = bool(src.get("has_uploaded_file", False))
-
-        about_raw = src.get("about_raw")
+        # Перевіряємо нові поля
         skills = src.get("skills")
         experience = src.get("experience")
         education = src.get("education")
+        summary = src.get("summary")
 
         has_structured = (
             (isinstance(skills, (list, dict)) and bool(skills))
             or (isinstance(experience, (list, dict)) and bool(experience))
             or (isinstance(education, (list, dict)) and bool(education))
         )
+        has_full_text = isinstance(summary, str) and bool(summary.strip())
 
-        has_full_text = isinstance(about_raw, str) and bool(about_raw.strip())
-
-        # 🟡 Есть прикрепленный файл, но текст недоступен
-        yellow_unavailable = (
-            page_type == "resume"
-            and has_uploaded_file
-            and not has_structured
-            and not has_full_text
-        )
-
-        # 🔴 Страница полностью пустая
         red_empty_page = (
-            page_type == "resume"
-            and not has_uploaded_file
-            and not has_structured
-            and not has_full_text
+            page_type == "resume" and not has_structured and not has_full_text
         )
 
-
-        if yellow_unavailable:
-            verdict_emoji = "🟡"
-            evidence_lines = "- (дані резюме недоступні для аналізу)"
-            missing_lines = (
-                "- Дані недоступні: Work.ua не надав текст резюме без доступу роботодавця.\n"
-                "- Щоб отримати дані, зареєструйтеся на Work.ua як роботодавець і придбайте послугу "
-                "«Доступ до бази кандидатів» або відповідний пакет послуг."
-            )
-
-        elif red_empty_page:
-            verdict_emoji = "🔴"
-            evidence_lines = "- (сторінка резюме не містить доступних даних)"
-            missing_lines = "- Дані відсутні на сторінці."
-
-        # -------- Standard report rendering --------
         if red_empty_page:
-            md.append(f"## {title} (сторінка порожня)")
-            md.append("")
-            md.append(f"[Посилання на резюме]({url})" if url else "[Посилання на резюме](#)")
-            md.append("")
-            md.append("**Вердикт:** 🔴")
-            md.append("")
-            md.append("- Дані відсутні на сторінці.")
-            md.append("")
-            return "\n".join(md)
+            return self._generate_error_block(title, url, "Дані відсутні на сторінці.")
 
-        # Not empty-page: render normal full report
-        if yellow_unavailable:
-            md.append(f"## {title} (дані недоступні)")
-        else:
-            md.append(f"## {title}")
+        # 4. Рендеринг нормального звіту за статусами "Світлофора"
+        status_map = {"GREEN": "🟢", "YELLOW": "🟡", "RED": "🔴"}
 
+        # Беремо дані з аналізу (вони пріоритетні), або фолбек на json
+        cand_title = getattr(analysis, "candidate_role", title)
+        cand_url = getattr(analysis, "candidate_url", url)
+        status = getattr(analysis, "status", "RED")
+        verdict_emoji = status_map.get(status, "🔴")
+
+        md: list[str] = []
+        md.append(f"## {cand_title}")
         md.append("")
-        md.append(f"[Посилання на резюме]({url})" if url else "[Посилання на резюме](#)")
+        md.append(
+            f"[Посилання на резюме]({cand_url})"
+            if cand_url
+            else "[Посилання на резюме](#)"
+        )
         md.append("")
         md.append(f"**Вердикт:** {verdict_emoji}")
-        md.append("")
-        md.append("**Чому підходить:**")
-        md.append(evidence_lines)
-        md.append("")
-        md.append("**Ризики / Чого бракує:**")
-        md.append(missing_lines)
-        md.append("")
 
-        # For "data unavailable" resumes, hide the interview section entirely
-        if (
-            not yellow_unavailable
-            and not red_empty_page
-            and analysis.verdict != Verdict.REJECT
-        ):
-            md.append("**Питання для співбесіди:**")
-            md.append(questions_lines)
-            md.append("")
+        if status == "GREEN":
+            md.append("\n**Повна відповідність:**")
+        elif status == "YELLOW":
+            md.append("\n**Ризики / Чого бракує:**")
+        elif status == "RED":
+            md.append("\n**Чому не підходить:**")
+
+        # Виводимо єдине поле reasoning замість старих evidence/missing
+        md.append(getattr(analysis, "reasoning", ""))
+        md.append("\n---\n")
 
         return "\n".join(md)
 
-
-    def generate_from_files(self, resume_json_path: str, analysis_json_path: str) -> str:
+    def generate_from_files(
+        self, resume_json_path: str, analysis_json_path: str
+    ) -> str:
         resume = self._load_json(resume_json_path)
         analysis_obj = self._load_json(analysis_json_path)
         analysis = AnalysisResult.model_validate(analysis_obj)
         return self.generate(resume_json=resume, analysis=analysis)
 
     # --------------------
-    # Helpers: formatting
-    # --------------------
-
-    def _verdict_to_emoji(self, verdict: Verdict) -> str:
-        if verdict == Verdict.MATCH:
-            return "🟢"
-        if verdict == Verdict.CONDITIONAL:
-            return "🟡"
-        return "🔴"
-
-    def _format_evidence(self, analysis: AnalysisResult) -> str:
-        if not analysis.evidence:
-            return "- (немає явних підтверджень у тексті)"
-        lines = []
-        for e in analysis.evidence:
-            # Only quote + what it supports (no private info)
-            lines.append(f"- «{e.quote}» — {e.supports} ({e.location})")
-        return "\n".join(lines)
-
-    def _format_missing(self, analysis: AnalysisResult) -> str:
-        if not analysis.missing_criteria:
-            return "- (нічого критичного не бракує за поточними критеріями)"
-        return "\n".join(f"- {m}" for m in analysis.missing_criteria)
-
-    def _format_questions(self, analysis: AnalysisResult) -> str:
-        if not analysis.interview_questions:
-            return "- (питання не згенеровані)"
-        return "\n".join(f"- {q}" for q in analysis.interview_questions)
-
-    # --------------------
-    # Error handling
+    # Helpers: Error handling
     # --------------------
 
     def _generate_error_block(self, title: str, url: str, error_msg: str) -> str:
-        """Generate markdown block for failed analysis."""
         md: list[str] = []
         md.append(f"## {title}")
         md.append("")
@@ -190,13 +117,11 @@ class ReportGenerator:
         md.append("")
         md.append(f"- {error_msg}")
         md.append("")
-        md.append("")
         md.append("---")
         md.append("")
         return "\n".join(md)
 
     def _generate_protected_block(self, title: str, url: str) -> str:
-        """Generate markdown block for protected/login-required resumes."""
         md: list[str] = []
         md.append(f"## {title}")
         md.append("")
@@ -209,7 +134,9 @@ class ReportGenerator:
         md.append("Немає даних")
         md.append("")
         md.append("**Ризики / Чого бракує:**")
-        md.append("Доступ до резюме обмежений, перейдіть за посиланням для отримання даних резюме.")
+        md.append(
+            "Доступ до резюме обмежений, перейдіть за посиланням для отримання даних резюме."
+        )
         md.append("")
         md.append("---")
         md.append("")
@@ -228,9 +155,7 @@ class ReportGenerator:
             v = resume_json.get(k)
             if isinstance(v, str) and v.strip():
                 return v.strip()
-
         return ""
-
 
     def _extract_url(self, resume_json: Dict[str, Any]) -> str:
         payload = resume_json.get("payload")
@@ -242,7 +167,6 @@ class ReportGenerator:
         v = resume_json.get("url")
         return v.strip() if isinstance(v, str) and v.strip() else ""
 
-
     def _load_json(self, path: str) -> Dict[str, Any]:
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -251,4 +175,6 @@ class ReportGenerator:
                 raise ReportGeneratorError(f"JSON must be an object: {path}")
             return data
         except Exception as e:
-            raise ReportGeneratorError(f"Failed to load JSON: {path}. Error: {e}") from e
+            raise ReportGeneratorError(
+                f"Failed to load JSON: {path}. Error: {e}"
+            ) from e

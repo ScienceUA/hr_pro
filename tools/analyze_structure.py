@@ -168,7 +168,11 @@ def analyze_one_file(filepath: Path, out) -> None:
             # поднимаемся на 1-2 уровня, если попали в span/i
             container = parent
             for _ in range(2):
-                if isinstance(container, Tag) and container.name in {"span", "i", "b", "strong"} and isinstance(container.parent, Tag):
+                if (
+                    isinstance(container, Tag)
+                    and container.name in {"span", "i", "b", "strong"}
+                    and isinstance(container.parent, Tag)
+                ):
                     container = container.parent
             out.write(f"     Text: {text[:120]}\n")
             out.write(f"     Path: {build_selector_path(container)}\n")

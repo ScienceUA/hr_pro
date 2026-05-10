@@ -7,7 +7,8 @@ services:
 
     # Only /app/out is writable (mounted)
     volumes:
-    - ./out:/app/out:rw
+      - ./out:/app/out:rw
+      - chromadb_data:/app/chromadb_data:rw
 
     # Security hardening
     read_only: true
@@ -16,6 +17,59 @@ services:
 
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - APP_ENV=local
+      - ALLOW_IN_MEMORY_SESSION_FALLBACK=false
+      - USE_PARSER_SERVICE_PREVIEW=${USE_PARSER_SERVICE_PREVIEW:-false}
+      - USE_PARSER_SERVICE_PARSE=${USE_PARSER_SERVICE_PARSE:-false}
+      - PARSER_SERVICE_BASE_URL=http://parser-service:8000
 
-    # Override with: docker compose run --rm hr-pro-agent python run_agent.py --query "Python Kyiv" --mode fast
-    command: ["python", "run_agent.py", "--help"]
+    ports:
+      - "8000:8000"
+
+    depends_on:
+      - redis
+      - parser-service
+
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  parser-service:
+    build:
+      context: .
+      dockerfile: parser_service/Dockerfile
+    image: hr-pro-parser:local
+    container_name: hr-pro-parser
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=100m
+    ports:
+      - "8001:8000"
+    command: ["uvicorn", "parser_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: hr-pro-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:
+  chromadb_data:
