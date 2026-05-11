@@ -58,12 +58,30 @@ def _parser_service_response(parsed: bool = True) -> dict:
     }
 
 
-def _patch_analysis_runtime(monkeypatch, adapter):
+def _patch_analysis_runtime(
+    monkeypatch,
+    preview_data: dict | None = None,
+    legacy_parse_result: tuple[dict, list] | None = None,
+):
     vector_cache = Mock()
     vector_cache.get_cached_by_criteria.return_value = []
     vector_cache.save_analysis = Mock()
     repo = Mock()
     repo.exists.return_value = False
+    preview = AsyncMock(
+        return_value=preview_data
+        or {
+            "total_found": 1,
+            "urls": ["https://www.work.ua/resumes/123/"],
+        }
+    )
+    legacy_parse = AsyncMock(
+        return_value=legacy_parse_result
+        or (
+            {"saved": 0, "errors": 0, "skipped": 0, "critical_error": None},
+            [],
+        )
+    )
 
     monkeypatch.setattr(
         orchestrator,
@@ -71,14 +89,15 @@ def _patch_analysis_runtime(monkeypatch, adapter):
         Mock(return_value=vector_cache),
     )
     monkeypatch.setattr(orchestrator, "get_repository", Mock(return_value=repo))
-    monkeypatch.setattr(orchestrator, "get_adapter", Mock(return_value=adapter))
+    monkeypatch.setattr(orchestrator, "preview_with_legacy_adapter", preview)
+    monkeypatch.setattr(orchestrator, "parse_urls_with_legacy_adapter", legacy_parse)
     monkeypatch.setattr(orchestrator, "generate_report", Mock(return_value="# Report"))
 
     redis = Mock()
     redis.set_task_status = AsyncMock()
     monkeypatch.setattr(orchestrator, "redis_client", redis)
 
-    return repo
+    return repo, preview, legacy_parse
 
 
 def _patch_analyzer(monkeypatch):
@@ -95,17 +114,8 @@ def _patch_analyzer(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_analysis_parse_flag_off_uses_direct_adapter(monkeypatch):
-    adapter = AsyncMock()
-    adapter.preview.return_value = {
-        "total_found": 1,
-        "urls": ["https://www.work.ua/resumes/123/"],
-    }
-    adapter.run_from_urls.return_value = (
-        {"saved": 0, "errors": 0, "skipped": 0, "critical_error": None},
-        [],
-    )
-    _patch_analysis_runtime(monkeypatch, adapter)
+async def test_analysis_parse_flag_off_uses_legacy_parse_compat_boundary(monkeypatch):
+    _repo, preview, legacy_parse = _patch_analysis_runtime(monkeypatch)
     parser_service_parse = AsyncMock(return_value=_parser_service_response())
     monkeypatch.setattr(orchestrator.settings, "USE_PARSER_SERVICE_PARSE", False)
     monkeypatch.setattr(
@@ -116,8 +126,10 @@ async def test_analysis_parse_flag_off_uses_direct_adapter(monkeypatch):
 
     await orchestrator.run_analysis_task("session-1", _payload())
 
-    adapter.run_from_urls.assert_awaited_once_with(
-        ["https://www.work.ua/resumes/123/"]
+    preview.assert_awaited_once_with(_payload())
+    legacy_parse.assert_awaited_once_with(
+        _payload(),
+        ["https://www.work.ua/resumes/123/"],
     )
     parser_service_parse.assert_not_awaited()
 
@@ -126,15 +138,16 @@ async def test_analysis_parse_flag_off_uses_direct_adapter(monkeypatch):
 async def test_analysis_parse_flag_on_uses_parser_service_for_deduped_urls(
     monkeypatch,
 ):
-    adapter = AsyncMock()
-    adapter.preview.return_value = {
-        "total_found": 2,
-        "urls": [
-            "https://www.work.ua/resumes/123/",
-            "https://www.work.ua/resumes/456/",
-        ],
-    }
-    repo = _patch_analysis_runtime(monkeypatch, adapter)
+    repo, preview, legacy_parse = _patch_analysis_runtime(
+        monkeypatch,
+        preview_data={
+            "total_found": 2,
+            "urls": [
+                "https://www.work.ua/resumes/123/",
+                "https://www.work.ua/resumes/456/",
+            ],
+        },
+    )
     repo.exists.side_effect = [False, True]
     parser_service_parse = AsyncMock(
         return_value=_parser_service_response(parsed=False)
@@ -148,24 +161,19 @@ async def test_analysis_parse_flag_on_uses_parser_service_for_deduped_urls(
 
     await orchestrator.run_analysis_task("session-1", _payload())
 
-    adapter.preview.assert_awaited_once_with(_payload().to_adapter_payload())
+    preview.assert_awaited_once_with(_payload())
     parser_service_parse.assert_awaited_once_with(
         source="workua",
         url="https://www.work.ua/resumes/123/",
     )
-    adapter.run_from_urls.assert_not_awaited()
+    legacy_parse.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_analysis_parse_flag_on_keeps_url_discovery_on_legacy_preview(
     monkeypatch,
 ):
-    adapter = AsyncMock()
-    adapter.preview.return_value = {
-        "total_found": 1,
-        "urls": ["https://www.work.ua/resumes/123/"],
-    }
-    _patch_analysis_runtime(monkeypatch, adapter)
+    _repo, preview, legacy_parse = _patch_analysis_runtime(monkeypatch)
     parser_service_parse = AsyncMock(return_value=_parser_service_response(parsed=False))
     monkeypatch.setattr(orchestrator.settings, "USE_PARSER_SERVICE_PARSE", True)
     monkeypatch.setattr(
@@ -176,8 +184,8 @@ async def test_analysis_parse_flag_on_keeps_url_discovery_on_legacy_preview(
 
     await orchestrator.run_analysis_task("session-1", _payload())
 
-    adapter.preview.assert_awaited_once_with(_payload().to_adapter_payload())
-    adapter.run_from_urls.assert_not_awaited()
+    preview.assert_awaited_once_with(_payload())
+    legacy_parse.assert_not_awaited()
     parser_service_parse.assert_awaited_once_with(
         source="workua",
         url="https://www.work.ua/resumes/123/",
@@ -188,12 +196,7 @@ async def test_analysis_parse_flag_on_keeps_url_discovery_on_legacy_preview(
 async def test_analysis_parse_flag_on_saves_core_resume_and_analyzes_stable_core_dict(
     monkeypatch,
 ):
-    adapter = AsyncMock()
-    adapter.preview.return_value = {
-        "total_found": 1,
-        "urls": ["https://www.work.ua/resumes/123/"],
-    }
-    repo = _patch_analysis_runtime(monkeypatch, adapter)
+    repo, preview, legacy_parse = _patch_analysis_runtime(monkeypatch)
     analyzer = _patch_analyzer(monkeypatch)
     parser_service_parse = AsyncMock(return_value=_parser_service_response(parsed=True))
     monkeypatch.setattr(orchestrator.settings, "USE_PARSER_SERVICE_PARSE", True)
@@ -205,8 +208,8 @@ async def test_analysis_parse_flag_on_saves_core_resume_and_analyzes_stable_core
 
     await orchestrator.run_analysis_task("session-1", _payload())
 
-    adapter.preview.assert_awaited_once_with(_payload().to_adapter_payload())
-    adapter.run_from_urls.assert_not_awaited()
+    preview.assert_awaited_once_with(_payload())
+    legacy_parse.assert_not_awaited()
     parser_service_parse.assert_awaited_once_with(
         source="workua",
         url="https://www.work.ua/resumes/123/",
