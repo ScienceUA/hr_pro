@@ -61,6 +61,7 @@ def _parser_service_response(parsed: bool = True) -> dict:
 def _patch_analysis_runtime(monkeypatch, adapter):
     vector_cache = Mock()
     vector_cache.get_cached_by_criteria.return_value = []
+    vector_cache.save_analysis = Mock()
     repo = Mock()
     repo.exists.return_value = False
 
@@ -78,6 +79,19 @@ def _patch_analysis_runtime(monkeypatch, adapter):
     monkeypatch.setattr(orchestrator, "redis_client", redis)
 
     return repo
+
+
+def _patch_analyzer(monkeypatch):
+    analyzer = Mock()
+    analyzer.analyze.return_value = {
+        "candidate_url": "https://www.work.ua/resumes/123/",
+        "candidate_role": "Python Developer",
+        "status": "GREEN",
+        "reasoning": "Matches criteria.",
+    }
+    analyzer_cls = Mock(return_value=analyzer)
+    monkeypatch.setattr(orchestrator, "ResumeAnalyzer", analyzer_cls)
+    return analyzer
 
 
 @pytest.mark.asyncio
@@ -134,11 +148,110 @@ async def test_analysis_parse_flag_on_uses_parser_service_for_deduped_urls(
 
     await orchestrator.run_analysis_task("session-1", _payload())
 
+    adapter.preview.assert_awaited_once_with(_payload().to_adapter_payload())
     parser_service_parse.assert_awaited_once_with(
         source="workua",
         url="https://www.work.ua/resumes/123/",
     )
     adapter.run_from_urls.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_analysis_parse_flag_on_keeps_url_discovery_on_legacy_preview(
+    monkeypatch,
+):
+    adapter = AsyncMock()
+    adapter.preview.return_value = {
+        "total_found": 1,
+        "urls": ["https://www.work.ua/resumes/123/"],
+    }
+    _patch_analysis_runtime(monkeypatch, adapter)
+    parser_service_parse = AsyncMock(return_value=_parser_service_response(parsed=False))
+    monkeypatch.setattr(orchestrator.settings, "USE_PARSER_SERVICE_PARSE", True)
+    monkeypatch.setattr(
+        orchestrator,
+        "parse_resume_with_parser_service",
+        parser_service_parse,
+    )
+
+    await orchestrator.run_analysis_task("session-1", _payload())
+
+    adapter.preview.assert_awaited_once_with(_payload().to_adapter_payload())
+    adapter.run_from_urls.assert_not_awaited()
+    parser_service_parse.assert_awaited_once_with(
+        source="workua",
+        url="https://www.work.ua/resumes/123/",
+    )
+
+
+@pytest.mark.asyncio
+async def test_analysis_parse_flag_on_saves_core_resume_and_analyzes_stable_core_dict(
+    monkeypatch,
+):
+    adapter = AsyncMock()
+    adapter.preview.return_value = {
+        "total_found": 1,
+        "urls": ["https://www.work.ua/resumes/123/"],
+    }
+    repo = _patch_analysis_runtime(monkeypatch, adapter)
+    analyzer = _patch_analyzer(monkeypatch)
+    parser_service_parse = AsyncMock(return_value=_parser_service_response(parsed=True))
+    monkeypatch.setattr(orchestrator.settings, "USE_PARSER_SERVICE_PARSE", True)
+    monkeypatch.setattr(
+        orchestrator,
+        "parse_resume_with_parser_service",
+        parser_service_parse,
+    )
+
+    await orchestrator.run_analysis_task("session-1", _payload())
+
+    adapter.preview.assert_awaited_once_with(_payload().to_adapter_payload())
+    adapter.run_from_urls.assert_not_awaited()
+    parser_service_parse.assert_awaited_once_with(
+        source="workua",
+        url="https://www.work.ua/resumes/123/",
+    )
+
+    repo.save_result.assert_called_once()
+    saved_resume = repo.save_result.call_args.args[0]
+    assert isinstance(saved_resume, CoreParsedResume)
+    assert saved_resume == CoreParsedResume(
+        url="https://www.work.ua/resumes/123/",
+        resume_id="123",
+        parsed=True,
+        source="workua",
+        payload={
+            "resume_id": "123",
+            "source": "workua",
+            "url": "https://www.work.ua/resumes/123/",
+            "title": "Python Developer",
+            "salary": None,
+            "location": None,
+            "skills": ["Python"],
+            "summary": None,
+            "experience": [],
+            "education": [],
+            "languages": [],
+        },
+        error=None,
+    )
+
+    expected_resume_dict = saved_resume.model_dump()
+    analyzer.analyze.assert_called_once_with(
+        resume_json=expected_resume_dict,
+        criteria_bundle=_payload().criteria_bundle,
+    )
+    orchestrator.get_vector_cache.return_value.save_analysis.assert_called_once_with(
+        resume_text="Python Developer\nSkills: Python",
+        role="python",
+        analysis_result={
+            "candidate_url": "https://www.work.ua/resumes/123/",
+            "candidate_role": "Python Developer",
+            "status": "GREEN",
+            "reasoning": "Matches criteria.",
+        },
+        url="https://www.work.ua/resumes/123/",
+    )
 
 
 @pytest.mark.asyncio
