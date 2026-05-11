@@ -11,6 +11,8 @@ from app.models.parsed_resume import (
 from app.services.legacy_parser_compat_service import (
     check_freshness_with_legacy_validator,
     get_legacy_adapter,
+    parse_urls_with_legacy_adapter,
+    preview_with_legacy_adapter,
 )
 from app.services.parser_runtime_service import (
     check_freshness_with_parser_service,
@@ -223,9 +225,7 @@ async def run_analysis_task(session_id: str, payload: SearchPayload):
                 ),
             )
 
-            adapter = get_adapter(payload.source)
-            adapter_payload = payload.to_adapter_payload()
-            preview_data = await adapter.preview(adapter_payload)
+            preview_data = await preview_with_legacy_adapter(payload)
             urls, skipped_duplicates = _filter_new_urls(
                 preview_data.get("urls", [])[:delta]
             )
@@ -236,7 +236,10 @@ async def run_analysis_task(session_id: str, payload: SearchPayload):
                         await parse_resumes_with_parser_service(payload, urls)
                     )
                 else:
-                    stats, newly_parsed_resumes = await adapter.run_from_urls(urls)
+                    stats, newly_parsed_resumes = await parse_urls_with_legacy_adapter(
+                        payload,
+                        urls,
+                    )
                 logger.info(
                     "Parsed %s new resumes. Stats: %s",
                     len(newly_parsed_resumes),
